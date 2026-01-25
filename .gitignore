@@ -69,3 +69,8 @@ tests/
 
 # Docker history
 .isaac-lab-docker-history
+
+simulate_dog_01/
+urdf/
+anymal_c
+MUJOCO_LOG.TXT
