@@ -14,16 +14,16 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
         "critic": ["policy", "privileged"],
     }
     # clip_actions = 100.0
-    num_steps_per_env = 35
-    max_iterations = 40000
+    num_steps_per_env = 25
+    max_iterations = 4000
     save_interval = 100
-    experiment_name = "Dog-test"
+    experiment_name = "plane_dog"
     logger = "tensorboard"
     resume = False
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
-        actor_obs_normalization=False,
-        critic_obs_normalization=False,
+        actor_obs_normalization=True,
+        critic_obs_normalization=True,
         actor_hidden_dims=[512, 512, 256, 128],
         critic_hidden_dims=[512, 512, 256, 128],
         activation="elu",

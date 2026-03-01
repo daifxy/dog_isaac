@@ -10,6 +10,8 @@
 import argparse
 import sys
 
+import cv2
+
 from isaaclab.app import AppLauncher
 
 # local imports
@@ -87,23 +89,6 @@ import numpy as np
 import copy
 from rsl_rl.modules import ActorCritic, ActorCriticRecurrent, resolve_rnd_config, resolve_symmetry_config
 from rsl_rl.networks import MLP, EmpiricalNormalization
-
-class mynet(torch.nn.Module):
-    def __init__(self, policy: ActorCritic):
-        super().__init__()
-        if hasattr(policy, "actor"):
-            self.actor: MLP = copy.deepcopy(policy.actor)
-        self.normalizer = torch.nn.Identity()
-
-    def forward(self, x):
-        x = self.normalizer(x)
-        return self.actor(x)
-
-    def save(self):
-        self.to('cpu')
-        torch.jit.script(self).save("/home/du/dog_baseon_isaac/logs/test_policy/policy.pt")
-        self.to('cuda')
-    
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
@@ -198,27 +183,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
     export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
     
-
-    my_net = mynet(runner.alg.policy)
-    my_net.save()
-
-    # try:
-    #     loaded_policy = torch.jit.load("/home/du/dog_baseon_isaac/logs/rsl_rl/Dog-test/25.12.28-23.21/exported/policy.pt")
-    #     loaded_policy.eval()
-    #     loaded_policy.to('cuda')
-    #     print("模型加载成功!")
-    #     print(loaded_policy)
-    # except Exception as e:
-    #     print(f"模型加载失败: {e}")
-    #     exit()
-
-    ########################################################################
-
     dt = env.unwrapped.step_dt
     env.unwrapped.train_mode = False
     # reset environment
     obs = env.get_observations()
     timestep = 0
+
 
     # gamepad
     pad = gamepad.control_gamepad(env.unwrapped.cfg.command_cfg)
@@ -233,9 +203,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             # env stepping
             obs, _, _, _ = env.step(actions)
             # commands
-            comands, reset_flag = pad.get_commands()
+            comands, reset_flag, terrain_id, terrain_level = pad.get_commands()
             # print(f"comands: {comands}")
             env.unwrapped.set_commands(np.arange(env.unwrapped.num_envs), comands)
+            if terrain_id or terrain_level:
+                env.unwrapped.set_terrain_id(terrain_id, terrain_level)
+
             if reset_flag:
                 env.reset()
         

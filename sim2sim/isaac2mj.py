@@ -1,195 +1,3 @@
-# import sys
-# import os
-# import torch
-# import mujoco
-# import mujoco.viewer
-# import time
-# import argparse
-# import pickle
-# import numpy as np
-# # import obs_save
-# # 加载 mujoco 模型
-# m = mujoco.MjModel.from_xml_path('sim2sim/scence.xml')
-# d = mujoco.MjData(m)
-
-# parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-# sys.path.append(parent_dir)
-# from my_utils import gamepad
-
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# #储存观测状态
-# # obs_saver = obs_save.TensorTypeSaver(save_dir="./obs_data", device="cpu")
-
-# def get_sensor_data(sensor_name):
-#     sensor_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SENSOR, sensor_name)
-#     if sensor_id == -1:
-#         raise ValueError(f"Sensor '{sensor_name}' not found in model!")
-#     start_idx = m.sensor_adr[sensor_id]
-#     dim = m.sensor_dim[sensor_id]
-#     sensor_values = d.sensordata[start_idx : start_idx + dim]
-#     return torch.tensor(
-#         sensor_values, 
-#         device=device, 
-#         dtype=torch.float32
-#     )
-
-# def set_joint_angle(joint_name, angle):
-#     joint_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
-#     d.qpos[m.jnt_qposadr[joint_id]] = angle
-    
-# def world2self(quat, v):
-#     q_w = quat[0] 
-#     q_vec = quat[1:] 
-#     v_vec = torch.tensor(v, device=device,dtype=torch.float32)
-#     a = v_vec * (2.0 * q_w**2 - 1.0)
-#     b = torch.linalg.cross(q_vec, v_vec) * q_w * 2.0
-#     c = q_vec * torch.dot(q_vec, v_vec) * 2.0
-#     result = a - b + c
-#     return result.to(device)
-
-# def O_get_obs(env_cfg, obs_scales, actions, default_dof_pos, commands=[0.0, 0.0, 0.0, 0.22]):
-#     commands_scale = torch.tensor(
-#         [obs_scales["lin_vel"], obs_scales["lin_vel"], 
-#          obs_scales["ang_vel"], obs_scales["height_measurements"]], device=device, dtype=torch.float32)
-#     base_quat = get_sensor_data("orientation")
-#     gravity = [0.0, 0.0, -1.0]
-#     projected_gravity = world2self(base_quat,torch.tensor(gravity, device=device, dtype=torch.float32))
-#     base_lin_vel = world2self(base_quat,get_sensor_data("base_lin_vel"))
-#     base_ang_vel = get_sensor_data("base_ang_vel")
-#     dof_pos = torch.zeros(env_cfg["num_actions"], device=device, dtype=torch.float32)
-#     for i, dof_name in enumerate(env_cfg["dof_names"]):
-#         dof_pos[i] = get_sensor_data(dof_name+"_p")[0]
-#         if i==3:
-#             break
-#     dof_vel = torch.zeros(env_cfg["num_actions"], device=device, dtype=torch.float32)
-#     for i, dof_name in enumerate(env_cfg["dof_names"]):
-#         dof_vel[i] = get_sensor_data(dof_name+"_v")[0]
-
-#     cmds = torch.tensor(commands, device=device, dtype=torch.float32)
-
-#     print("base_lin_vel:", base_lin_vel)
-#     print("base_ang_vel:", base_ang_vel)
-#     print("projected_gravity:", projected_gravity)
-#     print("dof_pos:", dof_pos)
-#     print("dof_vel:", dof_vel)
-#     print("commands:", commands)
-#     # obs_saver.add_tensor("base_lin_vel", base_lin_vel)
-#     # obs_saver.add_tensor("base_ang_vel", base_ang_vel)
-#     # obs_saver.add_tensor("projected_gravity", projected_gravity)
-#     # obs_saver.add_tensor("dof_vel", dof_vel)
-#     # obs_saver.add_tensor("dof_pos", dof_pos[0:4])
-#     return torch.cat(
-#         [
-#             # base_lin_vel * obs_scales["lin_vel"],  # 3
-#             base_ang_vel * obs_scales["ang_vel"],  # 3
-#             projected_gravity,  # 3
-#             cmds * commands_scale,  # 4
-#             (dof_pos[0:4] - default_dof_pos[0:4]) * obs_scales["dof_pos"],  # 4
-#             dof_vel * obs_scales["dof_vel"],  # 6
-#             actions,  # 6
-#         ],
-#         axis=-1,
-#     )
-
-# def main():
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument("-e", "--exp_name", type=str, default="Dog-v25.11.19")
-#     args = parser.parse_args()
-
-#     # 拼接到 logs 文件夹的路径
-#     log_dir = os.path.join('./logs', args.exp_name)
-#     cfg_path = os.path.join(log_dir, 'cfgs.pkl')
-
-#     # 读取配置文件
-#     if os.path.exists(cfg_path):
-#         print("文件存在:", cfg_path)
-#         env_cfg, obs_cfg, reward_cfg, command_cfg, curriculum_cfg, domain_rand_cfg, terrain_cfg, train_cfg = pickle.load(open(cfg_path, "rb"))
-#     else:
-#         print("文件不存在:", cfg_path)
-#         exit()
-
-#     # 加载游戏控制器
-#     pad = gamepad.control_gamepad(command_cfg)
-#     commands, reset_flag = pad.get_commands()
-
-#     # 加载模型
-#     try:
-#         loaded_policy = torch.jit.load(os.path.join(log_dir, "policy.pt"))
-#         # loaded_policy = torch.jit.load("policy.pt")
-#         loaded_policy.eval()  # 设置为评估模式
-#         loaded_policy.to(device)
-#         print("模型加载成功!")
-#     except Exception as e:
-#         print(f"模型加载失败: {e}")
-#         exit()
-
-#     #dof limits
-#     lower = [env_cfg["dof_limit"][name][0] for name in env_cfg["dof_names"]]
-#     upper = [env_cfg["dof_limit"][name][1] for name in env_cfg["dof_names"]]
-#     dof_pos_lower = torch.tensor(lower).to(device)
-#     dof_pos_upper = torch.tensor(upper).to(device)
-        
-#     # 初始化观察数据
-#     history_obs_buf = torch.zeros((obs_cfg["history_length"], obs_cfg["num_slice_obs"]), device=device, dtype=torch.float32)
-#     slice_obs_buf = torch.zeros(obs_cfg["num_slice_obs"], device=device, dtype=torch.float32)
-#     obs_buf = torch.zeros((obs_cfg["num_obs"]), device=device, dtype=torch.float32)
-#     default_dof_pos = torch.tensor(
-#         [env_cfg["default_joint_angles"][name] for name in env_cfg["dof_names"]],
-#         device=device,
-#         dtype=torch.float32)
-#     actions = torch.zeros((env_cfg["num_actions"]), device=device, dtype=torch.float32)
-
-#     # 启动 mujoco 渲染
-#     with mujoco.viewer.launch_passive(m, d) as viewer:
-#         while viewer.is_running():
-#             # slice_obs_buf = get_obs(env_cfg=env_cfg, obs_scales=obs_cfg["obs_scales"],
-#             #                         actions=actions, default_dof_pos=default_dof_pos, commands=commands)
-#             # slice_obs_buf = slice_obs_buf.unsqueeze(0)
-#             # obs_buf = torch.cat([history_obs_buf, slice_obs_buf], dim=0).view(-1)
-#             # # 更新历史缓冲区
-#             # if obs_cfg["history_length"] > 1:
-#             #     history_obs_buf[:-1, :] = history_obs_buf[1:, :].clone()  # 移位操作
-#             # history_obs_buf[-1, :] = slice_obs_buf 
-#             # actions = loaded_policy(obs_buf)
-#             # actions = torch.clip(actions, -env_cfg["clip_actions"], env_cfg["clip_actions"])
-#             # # 更新动作
-#             # target_dof_pos = actions[0:4] * env_cfg["joint_action_scale"] + default_dof_pos[0:4]
-#             # target_dof_vel = actions[4:6] * env_cfg["wheel_action_scale"]
-#             # target_dof_pos = torch.clamp(target_dof_pos, dof_pos_lower[0:4],dof_pos_upper[0:4])
-#             # # print("act:", act)
-#             # for i in range(env_cfg["num_actions"]-2):
-#             #     d.ctrl[i] = target_dof_pos.detach().cpu().numpy()[i]
-
-#             # d.ctrl[4] = target_dof_vel.detach().cpu().numpy()[0]
-#             # d.ctrl[5] = target_dof_vel.detach().cpu().numpy()[1]
-            
-
-#             # 获取控制命令
-#             commands, reset_flag = pad.get_commands()
-#             if reset_flag:
-#                 mujoco.mj_resetData(m, d)
-
-#             # 执行一步模拟
-#             step_start = time.time()
-#             for i in range(5):
-#                 mujoco.mj_step(m, d)
-#             # 更新渲染
-#             viewer.sync()
-#             # 同步时间
-#             time_until_next_step = m.opt.timestep*5 - (time.time() - step_start)
-#             if time_until_next_step > 0:
-#                 time.sleep(time_until_next_step)
-#     print("close viewer")
-#     # obs_saver.save_all()
-
-# if __name__ == "__main__":
-#     main()
-
-# -------------------------------------------------------------------------------------------------------------------------------------------
-# -------------------------------------------------------------------------------------------------------------------------------------------
-# -------------------------------------------------------------------------------------------------------------------------------------------
-# -------------------------------------------------------------------------------------------------------------------------------------------
-
 import sys
 import os
 import torch
@@ -201,12 +9,12 @@ import yaml
 import argparse
 import re
 
-import rsl_rl
-from rsl_rl.algorithms import PPO
-from rsl_rl.env import VecEnv
-from rsl_rl.modules import ActorCritic, ActorCriticRecurrent, resolve_rnd_config, resolve_symmetry_config
-from rsl_rl.utils import resolve_obs_groups, store_code_state
-from rsl_rl.runners import DistillationRunner, OnPolicyRunner
+# import rsl_rl
+# from rsl_rl.algorithms import PPO
+# from rsl_rl.env import VecEnv
+# from rsl_rl.modules import ActorCritic, ActorCriticRecurrent, resolve_rnd_config, resolve_symmetry_config
+# from rsl_rl.utils import resolve_obs_groups, store_code_state
+# from rsl_rl.runners import DistillationRunner, OnPolicyRunner
 
 
 import mujoco
@@ -237,102 +45,87 @@ else:
     print(f"文件不存在:{log_dir}")
     exit()
 
-# 加载模型
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-try:
-    loaded_policy: torch.jit.RecursiveScriptModule = torch.jit.load(os.path.join(log_dir, "exported", "policy.pt"))
-    loaded_policy.eval()  # 设置为评估模式
-    loaded_policy.to(device)
-    print("模型加载成功!")
-except Exception as e:
-    print(f"模型加载失败: {e}")
 
 
 # 加载 mujoco 模型
 m = mujoco.MjModel.from_xml_path('sim2sim/scence.xml')
 d = mujoco.MjData(m)
 
+        # "lin_vel": 2.0,
+        # "ang_vel": 1.0,
+        # "dof_pos": 1.0,
+        # "dof_vel": 0.1,
+        # "lin_acc": 0.1,
 
-def world2self(quat, v):
-    q_w = quat[0] 
-    q_vec = quat[1:] 
-    v_vec = torch.tensor(v, device=device,dtype=torch.float32)
-    a = v_vec * (2.0 * q_w**2 - 1.0)
-    b = torch.linalg.cross(q_vec, v_vec) * q_w * 2.0
-    c = q_vec * torch.dot(q_vec, v_vec) * 2.0
-    result = a - b + c
-    return result.to(device)
+class GetObservation: 
+    def __init__(self, env_cfg, device):
+        self.projected_gravity = torch.zeros((1, 4), device=device, dtype=torch.float32)
+        self.foots_contact = torch.zeros((1, 4), device=device, dtype=torch.float32)
+        self.base_ang_vel = torch.zeros((1, 3), device=device, dtype=torch.float32)
+        self.slice_obs   = torch.zeros((1, env_cfg["env_cfg"]["policy_slice_obs"]), device=device, dtype=torch.float32)
+        self.history_obs = torch.zeros((1, env_cfg["env_cfg"]["history_length"], env_cfg["env_cfg"]["policy_slice_obs"]), device=device, dtype=torch.float32)
+        self.obs_buf = torch.zeros((1, env_cfg["env_cfg"]["observation_space"]), device=device, dtype=torch.float32)
+        self.dof_pos = torch.zeros((1, env_cfg["action_space"]), device=device, dtype=torch.float32)
+        self.dof_vel = torch.zeros((1, env_cfg["action_space"]), device=device, dtype=torch.float32)
+        self.lin_vel = torch.zeros((1, 3), device=device, dtype=torch.float32)
+        self.base_acc = torch.zeros((1, 3), device=device, dtype=torch.float32)
 
-def get_sensor_data(sensor_name: str):
-    sensor_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SENSOR, sensor_name)
-    if sensor_id == -1:
-        raise ValueError(f"Sensor '{sensor_name}' not found in model!")
-    start_idx = m.sensor_adr[sensor_id]
-    dim = m.sensor_dim[sensor_id]
-    sensor_values = d.sensordata[start_idx : start_idx + dim]
-    return torch.tensor(
-        sensor_values, 
-        device=device, 
-        dtype=torch.float32
-    )
-                # self.robot.data.root_ang_vel_b,
-                # self.robot.data.projected_gravity_b,   
-                # feet_contact_forces,
-                # self.robot.data.joint_pos - self.robot.data.default_joint_pos,
-                # self.robot.data.joint_vel,
-                # self._actions,
-                # self.commands,
+        self.obs_scales = env_cfg["obs_scales"]
 
-sensor = ["orientation"]
-obs_sensor = ["ang_vel", "foots_contact", "joint_pos", "joint_vel", "projected_gravity",]
-calf_joints_contact_sensor = ["FL_calf_joint_contact", "FR_calf_joint_contact", "RL_calf_joint_contact", "RR_calf_joint_contact"]
+    def world2self(self, quat, v)-> torch.Tensor:
+        q_w = quat[0] 
+        q_vec = quat[1:] 
+        v_vec = torch.tensor(v, device=device,dtype=torch.float32)
+        a = v_vec * (2.0 * q_w**2 - 1.0)
+        b = torch.linalg.cross(q_vec, v_vec) * q_w * 2.0
+        c = q_vec * torch.dot(q_vec, v_vec) * 2.0
+        result = a - b + c
+        return result.to(device)
 
-def get_obs(last_actins: torch.Tensor = None, commands: torch.Tensor = None):
-    dof_pos = torch.zeros(env_cfg["action_space"], device=device, dtype=torch.float32)
-    for i, dof_name in enumerate(env_cfg["joints_names"]):
-        dof_pos[i] = get_sensor_data(dof_name+"_p")
+    def get_sensor_data(self, sensor_name: str):
+        sensor_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SENSOR, sensor_name)
+        if sensor_id == -1:
+            raise ValueError(f"Sensor '{sensor_name}' not found in model!")
+        start_idx = m.sensor_adr[sensor_id]
+        dim = m.sensor_dim[sensor_id]
+        sensor_values = d.sensordata[start_idx : start_idx + dim]
+        return torch.tensor(
+            sensor_values, 
+            device=device, 
+            dtype=torch.float32
+        )
 
-    dof_vel = torch.zeros(env_cfg["action_space"], device=device, dtype=torch.float32)
-    for i, dof_name in enumerate(env_cfg["joints_names"]):
-        dof_vel[i] = get_sensor_data(dof_name+"_v")
+    def get_obs(self, last_actins: torch.Tensor = None, commands = None):
+        for i, dof_name in enumerate(env_cfg["joints_names"]):
+            self.dof_pos[:,i] = self.get_sensor_data(dof_name+"_p")[0] * self.obs_scales["dof_pos"]
 
-    # foots_contact = torch.zeros(4, device=device, dtype=torch.float32)
-    # for i, sensor_name in enumerate(calf_joints_contact_sensor):
-    #     foots_contact[i] = get_sensor_data(sensor_name)
+        for i, dof_name in enumerate(env_cfg["joints_names"]):
+            self.dof_vel[:,i] = self.get_sensor_data(dof_name+"_v")[0] * self.obs_scales["dof_vel"]
 
-    quat = get_sensor_data("orientation")
-    projected_gravity = world2self(quat, [0, 0, -1])
-    projected_gravity = projected_gravity/torch.linalg.norm(projected_gravity)
-    ang_vel = get_sensor_data("base_ang_vel")
-    # print("ang_vel:",projected_gravity)
+        quat = self.get_sensor_data("orientation")
+        self.projected_gravity = self.world2self(quat, [0.0, 0.0, -1.0]).unsqueeze(0)
+        self.base_ang_vel = self.get_sensor_data("base_ang_vel").unsqueeze(0) * self.obs_scales["ang_vel"]
+        self.lin_vel = self.get_sensor_data("base_lin_vel").unsqueeze(0) * self.obs_scales["lin_vel"]
+        # self.base_acc = self.get_sensor_data("base_acc").unsqueeze(0)
+        
+        self.slice_obs = torch.cat((self.lin_vel, self.base_ang_vel, self.projected_gravity, self.dof_pos, self.dof_vel), dim=1)
+        self.obs_buf = torch.cat([self.history_obs, self.slice_obs.unsqueeze(1)], dim=1).view(1, -1)
+        self.obs_buf = torch.cat([self.obs_buf, last_actins], dim=-1)
+        self.obs_buf = torch.cat([self.obs_buf, torch.tensor(commands, dtype=torch.float32, device=device).unsqueeze(0)], dim=-1)
 
-    result = torch.cat((ang_vel, dof_pos, dof_vel, projected_gravity, last_actins, commands), dim=0).unsqueeze(0)
-    # print("result:",result)
-    return result
+        clip_obs = self.obs_scales["clip_observations"]
+        self.obs_buf = torch.clip(self.obs_buf, -clip_obs, clip_obs)
 
+        if env_cfg["env_cfg"]["history_length"] > 1:
+            self.history_obs[:, :-1, :] = self.history_obs[:, 1:, :].clone()
+        self.history_obs[:, -1, :] = self.slice_obs.clone()
 
-class Env(VecEnv):
-    def __init__(self, env_cfg, num_envs = 1):
-        self.num_envs = num_envs
-        self.num_actions = env_cfg["action_space"]
+        return self.obs_buf
 
-    def get_observations(self) -> TensorDict:
-        return TensorDict({
-            "privileged": torch.zeros(1,env_cfg["state_space"]-env_cfg["observation_space"], dtype=torch.int8, device=device),
-            "policy": torch.zeros((1,env_cfg["observation_space"],), dtype=torch.int8, device=device),
-            })
-
-    def step(self, actions: torch.Tensor) -> tuple[TensorDict, torch.Tensor, torch.Tensor, dict]:
-        pass
-
-
-
-
-def main():
-    # 加载控制器
-    pad = gamepad.control_gamepad(env_cfg["command_cfg"])
+def main(log_dir):
     # 初始化观测
-    obs = torch.zeros((1,env_cfg["observation_space"]), dtype=torch.float32, device=device)
+    _obs = GetObservation(env_cfg, device)
 
     #dof limits
     lower = [env_cfg["joint_pos_limits"][name][0] for name in env_cfg["joints_names"]]
@@ -346,56 +139,63 @@ def main():
         for keys, value in env_cfg["robot_cfg"]["init_state"]["joint_pos"].items():
             if re.search(keys, name):
                 default_dof_pos.append(value)
-
     default_dof_pos = torch.tensor(default_dof_pos, device=device, dtype=torch.float32)
-    torch.jit.RecursiveScriptModule
 
-    # print(loaded_policy)
-    print("XXXXXXXXXXXXXXXXXXXXXXXXXXX")
-    
-    print(f"batch_first: {loaded_policy.rnn.batch_first}")
-    print(f"input_size: {loaded_policy.rnn.input_size}")
-    
-    
-    
+    try:
+        loaded_policy = torch.jit.load(f"{log_dir}/exported/policy.pt")
+        loaded_policy.eval()
+        loaded_policy.to('cuda')
+        print("模型加载成功!")
+        print(loaded_policy)
+    except Exception as e:
+        print(f"模型加载失败: {e}")
+        exit()
+
+
     # 启动mujoco渲染
-    decimation: int = 5
-    hidden = None
+    decimation: int = 10
+    last_processed_actions = torch.zeros((1, 12), device=device, dtype=torch.float32)
+
     with mujoco.viewer.launch_passive(m, d) as viewer:
+        # 加载控制器
+        pad = gamepad.control_gamepad(env_cfg["command_cfg"])
         with torch.no_grad():
+            obs = _obs.get_obs(torch.zeros((1, env_cfg["action_space"]), device=device, dtype=torch.float32), pad.get_commands()[0])
             while viewer.is_running():
                 actions = loaded_policy(obs)
                 ex_actions = torch.clip(actions, min=-env_cfg["clip_actions"], max=env_cfg["clip_actions"])
-                target_dof_pos = ex_actions * env_cfg["action_scale"] + default_dof_pos
-                target_dof_pos = torch.clamp(target_dof_pos, dof_pos_lower, dof_pos_upper)
-                to_cpu = target_dof_pos.detach().squeeze().cpu().numpy()
+                target_dof_pos = ((ex_actions * env_cfg["action_scale"]) + default_dof_pos - (_obs.dof_pos / _obs.obs_scales["dof_pos"]))
+                # target_dof_pos = torch.clip(target_dof_pos, dof_pos_lower, dof_pos_upper
+                # target_dof_pos = torch.clamp(target_dof_pos, dof_pos_lower, dof_pos_upper)
+                # processed_actions = target_dof_pos*0.7 + last_processed_actions*0.3
+                # last_processed_actions = processed_actions.clone()
+                to_cpu = target_dof_pos.cpu().numpy()
+
                 for i in range(env_cfg["action_space"]):
-                    d.ctrl[i] = to_cpu[i]
-
-                # # 获取命令
-                commands, reset_flag = pad.get_commands()
-                if reset_flag:
-                    mujoco.mj_resetData(m, d)
-
-                # # 获取观测
-                obs = get_obs(
-                    ex_actions.squeeze(),
-                    torch.tensor(commands, dtype=torch.float32, device=device),
-                )
-                # time.sleep(2)
-
-                # 执行模拟
+                    d.ctrl[i] = to_cpu[0, i]
+                print(d.ctrl.shape)
                 step_start = time.time()
+                # 执行模拟
                 for i in range(decimation):
                     mujoco.mj_step(m, d)
                 # 更新渲染
                 viewer.sync()
+
                 # 同步时间
                 time_until_next_step = m.opt.timestep * decimation - (time.time() - step_start)
                 if time_until_next_step > 0:
                     time.sleep(time_until_next_step)
+                
+                # 获取新的观测
+                commands, reset_flag, _, _ = pad.get_commands()
+                # print(commands)
+                if reset_flag:
+                    mujoco.mj_resetData(m, d)
+
+                obs = _obs.get_obs(ex_actions, commands)
+                # obs = obs + torch.normal(mean=0.0, std=0.008, size=(1, env_cfg["env_cfg"]["observation_space"]), device=device)
 
     print("close viewer")
 
 if __name__ == "__main__":
-    main()
+    main(log_dir)

@@ -15,12 +15,12 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 # from isaaclab.utils.math import sample_uniform
-from isaaclab.sensors import ContactSensor, RayCaster
+from isaaclab.sensors import ContactSensor, RayCaster, Imu, Camera
 from isaaclab.terrains import TerrainImporter
 import isaaclab.envs.mdp as mdp
 from isaaclab.managers import SceneEntityCfg
 
-from .dog_env_cfg import DogEnvCfg
+from .dog_env_cfg import FlatEnvCfg
 import dog_baseon_isaac
 utils_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(dog_baseon_isaac.__file__))))
 if utils_path not in sys.path:
@@ -30,13 +30,13 @@ from my_utils.debug import _MyPrint_, Visualization
 def random_in_range(lower, upper, shape, device):
     return (upper - lower) * torch.rand(size = shape, device=device) + lower
 
-class DogEnv(DirectRLEnv):
-    cfg: DogEnvCfg
+class FlatEnv(DirectRLEnv):
+    cfg: FlatEnvCfg
 
-    def __init__(self, cfg: DogEnvCfg, render_mode: str | None = None, **kwargs):
+    def __init__(self, cfg: FlatEnvCfg, render_mode: str | None = None, **kwargs):
+        self.MyPrint = _MyPrint_()
         super().__init__(cfg, render_mode, **kwargs)
         self.train_mode: bool = True
-        self.MyPrint = _MyPrint_()
         self.visualize_marks = Visualization(self.num_envs, self.device)
 
 
@@ -76,10 +76,10 @@ class DogEnv(DirectRLEnv):
         self.robot.write_joint_position_limit_to_sim(self.joint_limits)
 
         # -- set joint velocity limits
-        if self.train_mode:
-            self.joint_vel_limits = torch.zeros((self.num_envs, len(self.cfg.joints_names)), device=self.device, dtype=torch.float32)
-            self.joint_vel_limits[:] = 6.5
-            self.robot.write_joint_velocity_limit_to_sim(self.joint_vel_limits)
+        # if self.train_mode:
+        #     self.joint_vel_limits = torch.zeros((self.num_envs, len(self.cfg.joints_names)), device=self.device, dtype=torch.float32)
+        #     self.joint_vel_limits[:] = 9.0
+        #     self.robot.write_joint_velocity_limit_to_sim(self.joint_vel_limits)
 
         # -- Domain Randomization
         self.domain_rand_cfg = self.cfg.other_randomize_cfg
@@ -152,7 +152,7 @@ class DogEnv(DirectRLEnv):
         self.curriculum_commands_level: int = 0
         self.curriculum_commands_end_level: int = math.ceil(
                 (1-self.cfg.curriculum_cfg["curriculum_min_commands_proportion"]) / self.cfg.curriculum_cfg["curriculum_level_growth_rate"]
-            ) + 1
+            ) + 10
         self.curriculum_force_steps: int = 0
 
         self.lin_vel_error = torch.zeros(self.num_envs, device=self.device, dtype=torch.float32)
@@ -175,15 +175,20 @@ class DogEnv(DirectRLEnv):
         self.fall = torch.zeros(self.num_envs, device=self.device, dtype=torch.float32)
         self.height_data = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float32)
 
-        self.privileged_obs = torch.zeros((self.num_envs, 4), device=self.device, dtype=torch.float32)
+        self.privileged_obs_buf = torch.zeros((self.num_envs, 4), device=self.device, dtype=torch.float32)
         self.obs_buf = torch.zeros((self.num_envs, self.cfg.env_cfg["observation_space"]), device=self.device, dtype=torch.float32)
-        self.history_obs = torch.zeros((self.num_envs, self.cfg.env_cfg["history_length"], self.cfg.env_cfg["policy_obs"]), device=self.device, dtype=torch.float32)
-        self.slice_obs_buf = torch.zeros((self.num_envs, self.cfg.env_cfg["policy_obs"]), device=self.device, dtype=torch.float32)
+        self.history_obs = torch.zeros((self.num_envs, self.cfg.env_cfg["history_length"], self.cfg.env_cfg["policy_slice_obs"]), device=self.device, dtype=torch.float32)
+        self.slice_obs_buf = torch.zeros((self.num_envs, self.cfg.env_cfg["policy_slice_obs"]), device=self.device, dtype=torch.float32)
         
         joints = self.cfg.joints_names
         self.apply_action_ids, names = self.robot.find_joints(joints, preserve_order=True)
 
-        self.last_pos = torch.zeros((self.num_envs, 3), device=self.device, dtype=torch.float32)
+        self.time_out = torch.zeros(self.num_envs, device=self.device, dtype=torch.float32)
+
+        self.obs_scales = self.cfg.obs_scales
+        self.noise_scale_vec = self._get_noise_scale_vec()
+
+        self.last_processed_actions = self._processed_actions.clone()
 
         # -- prepare reward functions and multiply reward scales by dt
         self.episode_sums = dict()
@@ -193,112 +198,102 @@ class DogEnv(DirectRLEnv):
             self.reward_scales[name] *= self.scene.physics_dt
             self.reward_functions[name] = getattr(self, "_reward_" + name)
             self.episode_sums[name] = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float32)
+
+        # -- terrain curriculum
+        if self.cfg.env_cfg["enable_terrain"]:
+            self.robot.data.default_root_state[:, :3] = self._terrain.terrain_origins[0, 27, :]
+            # self._update_terrain()
         
 
-        # 修改在地形基础上的初始位置
-        if self.enable_terrain:
-            self.cache_default_root_state = self.robot.data.default_root_state.clone()
-            # self.robot.data.default_root_state[:, :3] += self._terrain.terrain_origins[1,0,:] # TODO 根据课程设置随机化地形初始位置
-        # print(self.robot.data.root_ang_vel_b,"7\n")
-        self.xx = 0
-
-# ----------------------------------------------------------------------------------------------------- _setup_scene
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
         # add articulation to scene
         self.scene.articulations["Robot"] = self.robot
-        
         # terrain
         self.enable_terrain = self.cfg.env_cfg["enable_terrain"]
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
         self._terrain: TerrainImporter = self.cfg.terrain.class_type(self.cfg.terrain)
-
         # sensors
         self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
         self.scene.sensors["contact_sensor"] = self._contact_sensor
         self._height_scanner = RayCaster(self.cfg.height_scanner)
         self.scene.sensors["height_scanner"] = self._height_scanner
-
+        self._imu = Imu(self.cfg.imu_sensor)
+        self.scene.sensors["imu"] = self._imu
+        # self.MyPrint(self.scene.sensors, "RED")
+        # self._camera = Camera(self.cfg.camera_sensor)
+        # self.scene.sensors["camera"] = self._camera
         # clone and replicate
         self.scene.clone_environments(copy_from_source=False)
         if self.device == "cpu":
             self.MyPrint("CPU simulation is not supported!!!", "ERROR", True)
-
         # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
-# ----------------------------------------------------------------------------------------------------- set_commands
     def set_commands(self, envs_idx, commands):
         self.commands[envs_idx] = torch.tensor(commands, device=self.device, dtype=torch.float32)
 
-# ----------------------------------------------------------------------------------------------------- _pre_physics_step
-    # DONE
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self._actions = torch.clip(actions, -self.cfg.clip_actions, self.cfg.clip_actions)
-        self._processed_actions = (self._actions * self.cfg.action_scale) + self.robot.data.default_joint_pos
+        self._processed_actions = (self._actions * self.cfg.action_scale) + self.robot.data.default_joint_pos - self.robot.data.joint_pos
         self._processed_actions = torch.clip(self._processed_actions, self.joint_limits[:,:,0], self.joint_limits[:,:,1])
-
-# ----------------------------------------------------------------------------------------------------- _apply_action
-    # DONE
+        self._processed_actions = self._processed_actions*0.6 + self.last_processed_actions*0.4
+        self.last_processed_actions = self._processed_actions.clone()
+        # if self.cfg.noise_cfg["dead_zone"] > 0.0:
+        #     action_ch = self._processed_actions - self._previous_actions
+        #     less_than = action_ch.abs() < self.cfg.noise_cfg["dead_zone"]
+        #     self._processed_actions[less_than] = self._previous_actions[less_than]
+    
     def _apply_action(self) -> None:
         self.robot.set_joint_position_target(self._processed_actions, self.apply_action_ids)
         # 基础命令训练好后开始加入外部力干扰
         if self.domain_rand_cfg["external_force_and_torque"]["enabled"] and (self.curriculum_commands_level > self.curriculum_commands_end_level or self.train_mode==False):
             self.set_external_force_and_torque()
 
-# ----------------------------------------------------------------------------------------------------- _get_observations
-    # DONE
     def _get_observations(self,) -> dict:
-        if self.xx%350 == 0:
-            self.xx = 0
-            self.MyPrint(f"curriculum_commands_level:{self.curriculum_commands_level}","RED")
-            self.MyPrint(f"joint_vel_limits:{self.robot.data.joint_vel_limits}", "RED")
-        self.xx += 1
-
         # update previous actions
         self._previous_actions = self._actions.clone()
+        
+        # resample commands
+        resample_ids = (self.episode_length_buf % self.cfg.resample_commands_length == 0).nonzero().flatten()
+        self.resample_commands(resample_ids)
 
         # feet contact forces
         # net_contact_forces = self._contact_sensor.data.net_forces_w_history
-        # feet_contact_forces = torch.norm(net_contact_forces[:, 0, self._feet_ids], dim=-1)
+        # feet_contact_forces = torch.norm(net_contact_forces[:, 0, self._feet_ids], dim=-1)>1.0
 
         # update observation buffer
-        self.slice_obs_buf = torch.cat(
-            (
-                self.robot.data.root_com_ang_vel_b,
-                self.robot.data.projected_gravity_b,   
-                # feet_contact_forces,
-                self.robot.data.joint_pos - self.robot.data.default_joint_pos,
-                self.robot.data.joint_vel,
-                self._actions,
-                # self.commands,
-            ),
-            dim=-1,
-        )
-        nan_in_data = torch.isnan(self.robot.data.root_com_ang_vel_b).any()
-        if nan_in_data:
-            self.MyPrint("Nan in root_ang_vel_b!!!", "ERROR", True)
+        self.slice_obs_buf = torch.cat((    self.robot.data.root_com_lin_vel_b * self.cfg.obs_scales["lin_vel"],
+                                            self.robot.data.root_com_ang_vel_b * self.cfg.obs_scales["ang_vel"],
+                                            self._imu.data.lin_acc_b * self.cfg.obs_scales["lin_acc"],
+                                            self.robot.data.projected_gravity_b,
+                                            self.robot.data.joint_pos - self.robot.data.default_joint_pos,
+                                            self.robot.data.joint_vel * self.cfg.obs_scales["dof_vel"],
+                                            self._actions,),dim=-1,)
+        if self.cfg.noise_cfg["noise"]:
+            self.slice_obs_buf += (2 * torch.randn_like(self.slice_obs_buf) - 1) * self.noise_scale_vec
 
         self.obs_buf = torch.cat([self.history_obs, self.slice_obs_buf.unsqueeze(1)], dim=1).view(self.num_envs, -1)
-
         if self.cfg.env_cfg["history_length"] > 1:
             self.history_obs[:, :-1, :] = self.history_obs[:, 1:, :].clone() # 移位操作
         self.history_obs[:, -1, :] = self.slice_obs_buf 
-
         self.obs_buf = torch.cat([self.obs_buf, self.commands], axis=-1)
 
-        self.last_pos = self.robot.data.root_com_pos_w.clone()
+        self.privileged_obs_buf = self._get_states()
+
+        clip_obs = self.cfg.clip_observations
+        self.obs_buf = torch.clip(self.obs_buf, -clip_obs, clip_obs)
+        if self.cfg.state_space:
+            self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
 
         observations = {
             "policy": self.obs_buf, 
-            "privileged": self._get_states()
+            "privileged": self.privileged_obs_buf
         }
         return observations
     
-# ----------------------------------------------------------------------------------------------------- _get_states
-    # DONE
     def _get_states(self):
         self.height_data[:] = 0.0
         if self.enable_terrain:
@@ -308,31 +303,27 @@ class DogEnv(DirectRLEnv):
         else:
             self.height_data = (self.robot.data.root_com_pos_w[:, 2].unsqueeze(1)-0.12).clip(-1.0, 1.0)
         
-        self.privileged_obs = torch.cat(
-            (
-                self.robot.data.root_com_lin_vel_b,
-                self.height_data,
-            ),
-            dim=-1,
-        )
-        return self.privileged_obs
+        self.privileged_obs_buf = torch.cat((self.robot.data.root_com_lin_vel_b * self.cfg.obs_scales["lin_vel"],
+                                         self.height_data,),dim=-1,)
+        
+        return self.privileged_obs_buf
 
-# ----------------------------------------------------------------------------------------------------- _get_rewards
-    # DONE
+
     def _get_rewards(self) -> torch.Tensor:
         total_reward = torch.zeros((self.num_envs,), device=self.device, dtype=torch.float32)
-        # print(self.robot.data.root_ang_vel_b,"4\n")
 
         if self.train_mode:
             for name, reward_func in self.reward_functions.items():
                 rew = reward_func() * self.reward_scales[name]
                 total_reward += rew
                 self.episode_sums[name] += rew
-
+        
+        if self.cfg.reward_cfg["only_positive_rewards"]:
+            # total_reward += self.cfg.reward_cfg["reward_offset"]
+            total_reward = torch.clip(total_reward, min=0.0)
+        
         return total_reward
 
-# ----------------------------------------------------------------------------------------------------- _get_dones
-    # DONE
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         if self.train_mode:
             # 更新课程
@@ -341,25 +332,19 @@ class DogEnv(DirectRLEnv):
             self.curriculum_commands()
             if self.domain_rand_cfg["external_force_and_torque"]["enabled"] and self.curriculum_commands_level > self.curriculum_commands_end_level:
                 self.curriculum_external_force_and_torque()
-            # 重新采样命令
-            resample_ids = (self.episode_length_buf % self.cfg.resample_commands_length == 0).nonzero().flatten()
-            self.resample_commands(resample_ids)
 
             # 计算结束条件
-            time_out = self.episode_length_buf >= self.max_episode_length - 1
+            self.time_out = self.episode_length_buf >= self.max_episode_length - 1
             # 身体触地过重死亡
             net_contact_forces = self._contact_sensor.data.net_forces_w_history
             self.fall = torch.any(torch.max(torch.norm(net_contact_forces[:, :, self._base_id], dim=-1), dim=1)[0] > 10.0, dim=1)
         else:
-            time_out = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+            self.time_out = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
             self.fall = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
-        return self.fall, time_out
+        return self.fall, self.time_out
 
-# ----------------------------------------------------------------------------------------------------- _reset_idx
-    # TODO
     def _reset_idx(self, env_ids: Sequence[int] | None):
-        # print(self.robot.data.root_ang_vel_b,"2\n")
         if env_ids is None:
             env_ids = self.robot._ALL_INDICES
         
@@ -405,13 +390,11 @@ class DogEnv(DirectRLEnv):
         self.extras["log"].update(extras)
 
 
-# ----------------------------------------------------------------------------------------------------- set_external_force_and_torque
-    # DONE
     def set_external_force_and_torque(self): 
-        # Called in `self._apply_action()`
-        # Apply random external force specific body 
-        # These only apply when you call: `asset.write_data_to_sim()`, however, it is called in `self.step()`
-        
+        ''' Called in `self._apply_action()`
+            Apply random external force specific body 
+            These only apply when you call: `asset.write_data_to_sim()`, however, it is called in `self.step()`
+        '''
         # 完成外部力的环境开始计时到下一次执行外部力的间隔时间，未完成的环境间隔时间重置为0
         force_in_progress = self.external_forces_duration > 0
         self.external_forces_free_interval[force_in_progress] = -1
@@ -448,8 +431,8 @@ class DogEnv(DirectRLEnv):
         self.external_forces_duration -= self.physics_dt
         self._ud_t += 1
         
-        if not self.train_mode:
-            self.draw_force_marks(self._forces)
+        # if not self.train_mode:
+        #     self.draw_force_marks(self._forces)
 
         # 将力写入仿真
         self.robot.set_external_force_and_torque(self._forces, self._torques, self._positions, self._external_forces_body_ids, None, self.is_global)
@@ -467,12 +450,10 @@ class DogEnv(DirectRLEnv):
         zhou *= torch.sin(angle/2)
         w = torch.cos(angle/2).view(-1, 1)
         quat = torch.cat([w, zhou], dim=-1)
-        scale = torch.norm(forces_, dim=-1, keepdim=True)
-        scale = torch.cat([scale, torch.ones((self.num_envs, 2), device=self.device, dtype=torch.float32)], dim=-1)
+        scale = torch.norm(forces_, dim=-1, keepdim=True)*2
+        scale = torch.cat([scale, torch.ones((self.num_envs, 2), device=self.device, dtype=torch.float32)*0.4], dim=-1)
         self.visualize_marks.visualize(_positions, quat, scale, [0])
 
-# ----------------------------------------------------------------------------------------------------- curriculum_external_force_and_torque
-    # DONE
     def curriculum_external_force_and_torque(self):
         self.curriculum_force_steps += 1
         if self.curriculum_force_steps > self.curriculum_force_check_interval:
@@ -487,32 +468,18 @@ class DogEnv(DirectRLEnv):
                                                      min=self.curriculum_min_force_proportion*self.external_max_torque,
                                                      max=self.external_max_torque)
 
-# ----------------------------------------------------------------------------------------------------- resample_commands
     def resample_commands(self, env_ids: torch.Tensor | None = None) -> None:
         if env_ids is None:
             env_ids = self.robot._ALL_INDICES
         elif len(env_ids) == 0:
             return
         
-        # vel_xy
-        for idx in (0, 1):
+        for idx in range(self.cfg.command_space):
             self.commands[env_ids, idx] = torch.zeros_like(self.commands[env_ids, idx]).uniform_(
                 self.command_ranges[idx][0], self.command_ranges[idx][1]
             )
-        # ang
-        # safe_linv_x = torch.clip(torch.abs(self.commands[env_ids, 0]), min=1e-2)
-        # angv_limit = self.cfg.command_cfg["inverse_linx_angv"] / safe_linv_x
-        # angv_low = torch.clip(self.command_ranges[2, 0], min=-angv_limit)
-        # angv_high = torch.clip(self.command_ranges[2, 1], max=angv_limit)
-        # self.commands[env_ids, 2] = random_in_range(angv_low, angv_high, env_ids.shape, self.device)
-
-        self.commands[env_ids, 2] = torch.zeros_like(self.commands[env_ids, 2]).uniform_(
-                self.command_ranges[2][0], self.command_ranges[2][1]
-            )
         
 
-# ----------------------------------------------------------------------------------------------------- curriculum_commands
-    # DONE
     def curriculum_commands(self):
         self.curriculum_commands_steps += 1
         if self.curriculum_commands_steps >= self.cfg.curriculum_cfg["curriculum_commands_check_interval"]:
@@ -542,7 +509,7 @@ class DogEnv(DirectRLEnv):
                     # 更新课程等级
                     self.curriculum_commands_level += 1
                     # 更新速度限制
-                    self.joint_vel_limits[:] += self.cfg.curriculum_cfg["joint_max_vel_limit"] * self.cfg.curriculum_cfg["curriculum_level_growth_rate"]*2
+                    # self.joint_vel_limits[:] += self.cfg.curriculum_cfg["joint_max_vel_limit"] * self.cfg.curriculum_cfg["curriculum_level_growth_rate"]*2
                     # 更新命令范围
                     self.command_ranges[0, 0] += self.cfg.curriculum_cfg["curriculum_level_growth_rate"]*self.cfg.command_cfg["lin_vel_x_range"][0]
                     self.command_ranges[0, 1] += self.cfg.curriculum_cfg["curriculum_level_growth_rate"]*self.cfg.command_cfg["lin_vel_x_range"][1]
@@ -566,8 +533,8 @@ class DogEnv(DirectRLEnv):
                                                         self.cfg.curriculum_cfg["curriculum_min_commands_proportion"] * self.cfg.command_cfg["lin_vel_y_range"][1],
                                                         self.cfg.command_cfg["lin_vel_y_range"][1])
 
-                self.joint_vel_limits = torch.clamp(self.joint_vel_limits, 0, self.cfg.curriculum_cfg["joint_max_vel_limit"])
-                self.robot.write_joint_velocity_limit_to_sim(self.joint_vel_limits)
+                # self.joint_vel_limits = torch.clamp(self.joint_vel_limits, 0, self.cfg.curriculum_cfg["joint_max_vel_limit"])
+                # self.robot.write_joint_velocity_limit_to_sim(self.joint_vel_limits)
 
                 if self.mean_ang_vel_error < self.angv_range_up_threshold:
                     self.command_ranges[2, 0] += self.cfg.curriculum_cfg["curriculum_level_growth_rate"]*self.cfg.command_cfg["ang_vel_range"][0]
@@ -582,6 +549,19 @@ class DogEnv(DirectRLEnv):
                                                         self.cfg.curriculum_cfg["curriculum_min_commands_proportion"] * self.cfg.command_cfg["ang_vel_range"][1],
                                                         self.cfg.command_cfg["ang_vel_range"][1])
 
+    def _get_noise_scale_vec(self):
+        noise_vec = torch.zeros_like(self.slice_obs_buf[0])
+        self.add_noise = self.cfg.noise_cfg["noise"]
+        noise_scales = self.cfg.noise_cfg["noise_scales"]
+        noise_level = self.cfg.noise_cfg["noise_level"]
+        noise_vec[:3] = noise_scales["lin_vel"] * noise_level * self.obs_scales["lin_vel"]
+        noise_vec[3:6] = noise_scales["ang_vel"] * noise_level * self.obs_scales["ang_vel"]
+        noise_vec[6:9] = noise_scales["lin_acc"] * noise_level * self.obs_scales["lin_acc"]
+        noise_vec[9:12] = noise_scales["gravity"] * noise_level
+        noise_vec[12:24] = noise_scales["dof_pos"] * noise_level * self.obs_scales["dof_pos"]
+        noise_vec[24:36] = noise_scales["dof_vel"] * noise_level * self.obs_scales["dof_vel"]
+        noise_vec[36:48] = 0. # previous actions
+        return noise_vec
 
 # ----------------------------------------------------------------------------------------------------- reward functions
 
@@ -595,33 +575,27 @@ class DogEnv(DirectRLEnv):
         yaw_rate_error_mapped = torch.exp(-yaw_rate_error / self.cfg.reward_cfg["tracking_ang_sigma"])
         return yaw_rate_error_mapped
 
+    def _reward_termination(self):
+        # Terminal reward / penalty
+        return self.reset_buf * ~self.time_out
+
     def _reward_lin_vel_z(self):
         return torch.square(self.robot.data.root_lin_vel_b[:, 2])
 
     def _reward_tracking_height(self):
-        height_error = torch.square(self.height_data - 0.305).squeeze(dim=1)
+        height_error = torch.square(self.height_data - 0.3).squeeze(dim=1)
         return height_error
-      
-    def _reward_fall(self):
-        return (self.fall * 1)
 
-    def _reward_projected_gravity(self):
+    def _reward_orientation(self):
         reward = torch.sum(torch.square(self.robot.data.projected_gravity_b[:, :2]), dim=1)
         return reward
 
     def _reward_dof_acc(self):
-        # idx = (torch.norm(self.commands, dim=-1) < 0.2).nonzero().squeeze(dim=1)
-        # joint_acc = torch.clamp(self.robot.data.joint_acc, -1e4, 1e4)
-        rew = torch.sum(torch.square(self.robot.data.joint_acc), dim=1) 
-        # rew[idx] #*= 3.2
-        # self.MyPrint(self.robot.data.joint_acc,"RED")
-        return rew
+        return torch.sum(torch.square(self.robot.data.joint_acc), dim=1) 
 
     def _reward_action_rate(self):
         action_rate = self._previous_actions - self._actions
-        # idx = (torch.norm(self.commands, dim=-1) < 0.2).nonzero().squeeze(dim=1)
         rew = torch.sum(torch.square(action_rate), dim=1) 
-        # rew[idx] #*= 3.2
         return rew 
 
     def _reward_survive(self):
@@ -658,14 +632,7 @@ class DogEnv(DirectRLEnv):
     def _reward_stable_feet(self):
         net_contact_forces = self._contact_sensor.data.net_forces_w_history
         feet_contact = (torch.norm(net_contact_forces[:, 0, self._feet_ids], dim=-1) > 0.2) * 1.0
-        return torch.sum(feet_contact, dim=-1) * (
-            torch.norm(self.commands, dim=1) < 0.2
-        )
-
-    def _reward_stand_steadily(self):
-        pos_change = (self.robot.data.root_com_pos_w - self.last_pos).clamp(-1, 1)
-        pos_change = torch.square(pos_change)
-        return torch.sum(pos_change, dim=-1) * (torch.norm(self.commands, dim=1) < 0.12)
+        return torch.sum(feet_contact, dim=-1) # * (torch.norm(self.commands, dim=1) < 0.1)
 
     def _reward_undesired_contacts(self):
         net_contact_forces = self._contact_sensor.data.net_forces_w_history
@@ -676,7 +643,7 @@ class DogEnv(DirectRLEnv):
         return contacts
 
     def _reward_joint_vel(self):
-        rew = ((self.robot.data.joint_vel).abs() - 7.5).clip(min=0)
+        rew = ((self.robot.data.joint_vel).abs() - 10.0).clip(min=0)
         return torch.sum(torch.square(rew), dim=1)
     
     def _reward_joint_force(self):
@@ -691,4 +658,16 @@ class DogEnv(DirectRLEnv):
         net_contact_forces = self._contact_sensor.data.net_forces_w
         # is_contact = torch.max(torch.norm(net_contact_forces[:, :, self._feet_ids], dim=-1), dim=1)[0]
         contacts = torch.sum(torch.norm(net_contact_forces[:, self._feet_ids], dim=-1), dim=-1)
-        return contacts
+        rew = contacts > 50.
+        return rew*1
+
+    def _reward_stand_still(self):
+        # Penalize motion at zero commands
+        return torch.sum(torch.abs(self.robot.data.joint_pos - self.robot.data.default_joint_pos), dim=1) * (torch.norm(self.commands[:, :2], dim=1) < 0.1)
+
+    def _reward_no_jump(self):
+        net_contact_forces = self._contact_sensor.data.net_forces_w
+        # is_contact = torch.max(torch.norm(net_contact_forces[:, :, self._feet_ids], dim=-1), dim=1)[0]
+        contacts = torch.norm(net_contact_forces[:, self._feet_ids], dim=-1) < 1.
+        rew = contacts.all(dim=1) * (torch.norm(self.commands[:, :2], dim=1) > 0.1)
+        return rew
