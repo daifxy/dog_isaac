@@ -1,0 +1,135 @@
+<mujoco model="wheel_dog_urdf_skeleton">
+  <compiler angle="radian" meshdir="meshes/"/>
+
+  <default>
+    <motor ctrlrange="-1 1" ctrllimited="true"/>
+    <joint actuatorfrclimited="true" type="hinge"/>
+  </default>
+
+  <asset>
+    <mesh name="LB_ABAD_LINK" file="LB_ABAD_LINK.STL"/>
+    <mesh name="LB_FOOT_LINK" file="LB_FOOT_LINK.STL"/>
+    <mesh name="LB_HIP_LINK" file="LB_HIP_LINK.STL"/>
+    <mesh name="LB_KENN_LINK" file="LB_KENN_LINK.STL"/>
+    <mesh name="LF_ABAD_LINK" file="LF_ABAD_LINK.STL"/>
+    <mesh name="LF_FOOT_LINK" file="LF_FOOT_LINK.STL"/>
+    <mesh name="LF_HIP_LINK" file="LF_HIP_LINK.STL"/>
+    <mesh name="LF_KENN_LINK" file="LF_KENN_LINK.STL"/>
+    <mesh name="RB_ABAD_LINK" file="RB_ABAD_LINK.STL"/>
+    <mesh name="RB_FOOT_LINK" file="RB_FOOT_LINK.STL"/>
+    <mesh name="RB_HIP_LINK" file="RB_HIP_LINK.STL"/>
+    <mesh name="RB_KENN_LINK" file="RB_KENN_LINK.STL"/>
+    <mesh name="RF_ABAD_LINK" file="RF_ABAD_LINK.STL"/>
+    <mesh name="RF_FOOT_LINK" file="RF_FOOT_LINK.STL"/>
+    <mesh name="RF_HIP_LINK" file="RF_HIP_LINK.STL"/>
+    <mesh name="RF_KENN_LINK" file="RF_KENN_LINK.STL"/>
+    <mesh name="base_link" file="base_link.STL"/>
+  </asset>
+
+  <worldbody>
+    <body name="base_link">
+      <inertial pos="-0.0064993 -0.0009295 0.0021204" mass="7.4975959" diaginertia="0.0589761 0.1812866 0.2224493"/>
+      <freejoint name="base_link"/>
+      <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" type="mesh" mesh="base_link"/>
+      <body name="LB_ABAD_LINK" pos="-0.26885 0.07715 0.007">
+        <inertial pos="0.0009598 -0.0317346 0" mass="0.8603295" diaginertia="0.0006379 0.0007923 0.0006889"/>
+        <joint name="LB_ABAD_JOINT" pos="0 0 0" type="hinge" axis="1 0 0" range="-1 1" actuatorfrcrange="-42 42"/>
+        <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" type="mesh" mesh="LB_ABAD_LINK"/>
+        <body name="LB_HIP_LINK" pos="0 0.0674 0">
+          <inertial pos="-0.0027582 -0.0294115 -0.0240635" mass="1.3307055" diaginertia="0.0057764 0.0055352 0.0015608"/>
+          <joint name="LB_HIP_JOINT" pos="0 0 0" type="hinge" axis="0 1 0" range="-1.57 3.49" actuatorfrcrange="-42 42"/>
+          <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" type="mesh" mesh="LB_HIP_LINK"/>
+          <body name="LB_KENN_LINK" pos="0 0.011764 -0.2125">
+            <inertial pos="0.0039019 0.0253379 -0.1888436" mass="0.636513" diaginertia="0.0027405 0.002845 0.0003994"/>
+            <joint name="LB_KENN_JOINT" pos="0 0 0" type="hinge" axis="0 1 0" range="-2.7 -0.83" actuatorfrcrange="-42 42"/>
+            <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" type="mesh" mesh="LB_KENN_LINK"/>
+            <body name="LB_FOOT_LINK" pos="0 0.052 -0.22006">
+              <inertial pos="-0.0000548 0.0044286 -0.0000713" mass="0.4354423" diaginertia="0.0012966 0.0024981 0.0012973"/>
+              <joint name="LB_FOOT_JOINT" pos="0 0 0" type="hinge" axis="0 1 0"/>
+              <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="0.2471 0.2471 0.2471 1" type="mesh" mesh="LB_FOOT_LINK"/>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="LF_ABAD_LINK" pos="0.26915 0.07715 0.007">
+        <inertial pos="-0.0009598 -0.0317346 0" mass="0.8603295" diaginertia="0.0006379 0.0007923 0.0006889"/>
+        <joint name="LF_ABAD_JOINT" pos="0 0 0" type="hinge" axis="1 0 0" range="-1 1" actuatorfrcrange="-42 42"/>
+        <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" type="mesh" mesh="LF_ABAD_LINK"/>
+        <body name="LF_HIP_LINK" pos="0 0.0674 0">
+          <inertial pos="-0.0028159 -0.0294115 -0.0241435" mass="1.3307055" diaginertia="0.0057683 0.0055296 0.0015633"/>
+          <joint name="LF_HIP_JOINT" pos="0 0 0" type="hinge" axis="0 1 0" range="-1.57 3.49" actuatorfrcrange="-42 42"/>
+          <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" type="mesh" mesh="LF_HIP_LINK"/>
+          <body name="LF_KENN_LINK" pos="0 0.011764 -0.2125">
+            <inertial pos="0.0039019 0.0253379 -0.1888436" mass="0.636513" diaginertia="0.0027405 0.002845 0.0003994"/>
+            <joint name="LF_KENN_JOINT" pos="0 0 0" type="hinge" axis="0 1 0" range="-2.7 -0.83" actuatorfrcrange="-42 42"/>
+            <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" type="mesh" mesh="LF_KENN_LINK"/>
+            <body name="LF_FOOT_LINK" pos="0 0.052 -0.22006">
+              <inertial pos="-0.0000842 0.0012423 -0.0000301" mass="0.4354423" diaginertia="0.0012979 0.0024981 0.001296"/>
+              <joint name="LF_FOOT_JOINT" pos="0 0 0" type="hinge" axis="0 1 0"/>
+              <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="0.2471 0.2471 0.2471 1" type="mesh" mesh="LF_FOOT_LINK"/>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="RB_ABAD_LINK" pos="-0.26885 -0.07715 0.007">
+        <inertial pos="0.0009598 0.0317346 0" mass="0.8603295" diaginertia="0.0006379 0.0007923 0.0006889"/>
+        <joint name="RB_ABAD_JOINT" pos="0 0 0" type="hinge" axis="1 0 0" range="-1 1" actuatorfrcrange="-42 42"/>
+        <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" type="mesh" mesh="RB_ABAD_LINK"/>
+        <body name="RB_HIP_LINK" pos="0 -0.0674 0">
+          <inertial pos="-0.0027582 0.0294115 -0.0240635" mass="1.3307055" diaginertia="0.0057764 0.0055352 0.0015608"/>
+          <joint name="RB_HIP_JOINT" pos="0 0 0" type="hinge" axis="0 1 0" range="-1.57 3.49" actuatorfrcrange="-42 42"/>
+          <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" type="mesh" mesh="RB_HIP_LINK"/>
+          <body name="RB_KENN_LINK" pos="0 -0.011764 -0.2125">
+            <inertial pos="0.0039019 -0.0253379 -0.1888436" mass="0.636513" diaginertia="0.0027405 0.002845 0.0003994"/>
+            <joint name="RB_KENN_JOINT" pos="0 0 0" type="hinge" axis="0 1 0" range="-2.7 -0.83" actuatorfrcrange="-42 42"/>
+            <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" type="mesh" mesh="RB_KENN_LINK"/>
+            <body name="RB_FOOT_LINK" pos="0 -0.052 -0.22006">
+              <inertial pos="-0.0000548 -0.0044286 -0.0000713" mass="0.4354423" diaginertia="0.0012966 0.0024981 0.0012973"/>
+              <joint name="RB_FOOT_JOINT" pos="0 0 0" type="hinge" axis="0 1 0"/>
+              <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="0.2471 0.2471 0.2471 1" type="mesh" mesh="RB_FOOT_LINK"/>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="RF_ABAD_LINK" pos="0.26915 -0.07715 0.007">
+        <inertial pos="-0.0009598 0.0317346 0" mass="0.8603295" diaginertia="0.0006379 0.0007923 0.0006889"/>
+        <joint name="RF_ABAD_JOINT" pos="0 0 0" type="hinge" axis="1 0 0" range="-1 1" actuatorfrcrange="-42 42"/>
+        <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" type="mesh" mesh="RF_ABAD_LINK"/>
+        <body name="RF_HIP_LINK" pos="0 -0.0674 0">
+          <inertial pos="-0.0028159 0.0294115 -0.0241435" mass="1.3307055" diaginertia="0.0057683 0.0055296 0.0015633"/>
+          <joint name="RF_HIP_JOINT" pos="0 0 0" type="hinge" axis="0 1 0" range="-1.57 3.49" actuatorfrcrange="-42 42"/>
+          <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" type="mesh" mesh="RF_HIP_LINK"/>
+          <body name="RF_KENN_LINK" pos="0 -0.011764 -0.2125">
+            <inertial pos="0.0039019 -0.0253379 -0.1888436" mass="0.636513" diaginertia="0.0027405 0.002845 0.0003994"/>
+            <joint name="RF_KENN_JOINT" pos="0 0 0" type="hinge" axis="0 1 0" range="-2.7 -0.83" actuatorfrcrange="-42 42"/>
+            <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" type="mesh" mesh="RF_KENN_LINK"/>
+            <body name="RF_FOOT_LINK" pos="0 -0.052 -0.22006">
+              <inertial pos="-0.0000842 -0.0012423 -0.0000301" mass="0.4354423" diaginertia="0.0012979 0.0024981 0.001296"/>
+              <joint name="RF_FOOT_JOINT" pos="0 0 0" type="hinge" axis="0 1 0"/>
+              <geom pos="0 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="0.2471 0.2471 0.2471 1" type="mesh" mesh="RF_FOOT_LINK"/>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="LB_ABAD_JOINT" joint="LB_ABAD_JOINT"/>
+    <motor name="LB_FOOT_JOINT" joint="LB_FOOT_JOINT"/>
+    <motor name="LB_HIP_JOINT" joint="LB_HIP_JOINT"/>
+    <motor name="LB_KENN_JOINT" joint="LB_KENN_JOINT"/>
+    <motor name="LF_ABAD_JOINT" joint="LF_ABAD_JOINT"/>
+    <motor name="LF_FOOT_JOINT" joint="LF_FOOT_JOINT"/>
+    <motor name="LF_HIP_JOINT" joint="LF_HIP_JOINT"/>
+    <motor name="LF_KENN_JOINT" joint="LF_KENN_JOINT"/>
+    <motor name="RB_ABAD_JOINT" joint="RB_ABAD_JOINT"/>
+    <motor name="RB_FOOT_JOINT" joint="RB_FOOT_JOINT"/>
+    <motor name="RB_HIP_JOINT" joint="RB_HIP_JOINT"/>
+    <motor name="RB_KENN_JOINT" joint="RB_KENN_JOINT"/>
+    <motor name="RF_ABAD_JOINT" joint="RF_ABAD_JOINT"/>
+    <motor name="RF_FOOT_JOINT" joint="RF_FOOT_JOINT"/>
+    <motor name="RF_HIP_JOINT" joint="RF_HIP_JOINT"/>
+    <motor name="RF_KENN_JOINT" joint="RF_KENN_JOINT"/>
+  </actuator>
+</mujoco>

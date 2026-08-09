@@ -1,4 +1,4 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -9,8 +9,6 @@
 
 import argparse
 import sys
-
-import cv2
 
 from isaaclab.app import AppLauncher
 
@@ -24,7 +22,7 @@ parser.add_argument("--video_length", type=int, default=200, help="Length of the
 parser.add_argument(
     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
 )
-parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
+parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument(
     "--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point."
@@ -53,14 +51,23 @@ sys.argv = [sys.argv[0]] + hydra_args
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
+"""Check for installed RSL-RL version."""
+
+import importlib.metadata as metadata
+
+from packaging import version
+
+installed_version = metadata.version("rsl-rl-lib")
+
 """Rest everything follows."""
 
-import gymnasium as gym
 import os
 import time
-import torch
 
-from rsl_rl.runners import DistillationRunner, OnPolicyRunner
+import gymnasium as gym
+import torch
+# from rsl_rl_amp.runners import DistillationRunner, OnPolicyRunner, HimOnPolicyRunner
+from rsl_rl_.runners import DistillationRunner, OnPolicyRunner
 
 from isaaclab.envs import (
     DirectMARLEnv,
@@ -71,25 +78,25 @@ from isaaclab.envs import (
 )
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 
-from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
+from isaaclab_rl.rsl_rl import (
+    RslRlBaseRunnerCfg,
+    RslRlVecEnvWrapper,
+    export_policy_as_jit,
+    export_policy_as_onnx,
+)
+from rsl_rl_amp.utils.him_exporter import export_him_policy_as_jit, export_him_policy_as_onnx
+
+from isaaclab_rl.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
-import dog_baseon_isaac.tasks  # noqa: F401
+import dog.tasks  # noqa: F401
 
-utils_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-if utils_path not in sys.path:
-    sys.path.append(utils_path)
-from my_utils import gamepad
+from my_utils import GameKeyboard
 import numpy as np
-import copy
-from rsl_rl.modules import ActorCritic, ActorCriticRecurrent, resolve_rnd_config, resolve_symmetry_config
-from rsl_rl.networks import MLP, EmpiricalNormalization
-
 
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
@@ -101,6 +108,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # override configurations with non-hydra CLI arguments
     agent_cfg: RslRlBaseRunnerCfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+
+    # gamepad
+    pad = GameKeyboard()
+
+    # handle deprecated configurations
+    # agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, installed_version)
 
     # set the environment seed
     # note: certain randomizations occur in the environment initialization so we set the seed here
@@ -152,6 +165,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # load previously trained model
     if agent_cfg.class_name == "OnPolicyRunner":
         runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+    # if agent_cfg.class_name == "HimOnPolicyRunner":
+    #     runner = HimOnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     elif agent_cfg.class_name == "DistillationRunner":
         runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     else:
@@ -159,59 +174,67 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     runner.load(resume_path)
 
     # obtain the trained policy for inference
+    encoder = runner.get_inference_encoder(device=env.unwrapped.device)
     policy = runner.get_inference_policy(device=env.unwrapped.device)
 
-    # extract the neural network module
-    # we do this in a try-except to maintain backwards compatibility.
-    try:
-        # version 2.3 onwards
-        policy_nn = runner.alg.policy
-    except AttributeError:
-        # version 2.2 and below
-        policy_nn = runner.alg.actor_critic
+    # export the trained policy to JIT and ONNX formats
+    export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+
+    # if version.parse(installed_version) >= version.parse("4.0.0"):
+    #     # use the new export functions for rsl-rl >= 4.0.0
+    #     runner.export_policy_to_jit(path=export_model_dir, filename="policy.pt")
+    #     runner.export_policy_to_onnx(path=export_model_dir, filename="policy.onnx")
+    # else:
+    # extract the neural network for rsl-rl < 4.0.0
+    # if version.parse(installed_version) >= version.parse("2.3.0"):
+    # policy_nn = runner.alg.policy
+    # him_estimator = runner.alg.policy.him_estimator
+    # else:
+    #     policy_nn = runner.alg.actor_critic
 
     # extract the normalizer
-    if hasattr(policy_nn, "actor_obs_normalizer"):
-        normalizer = policy_nn.actor_obs_normalizer
-    elif hasattr(policy_nn, "student_obs_normalizer"):
-        normalizer = policy_nn.student_obs_normalizer
-    else:
-        normalizer = None
+    # if hasattr(policy_nn, "actor_obs_normalizer"):
+    #     normalizer = policy_nn.actor_obs_normalizer
+    # elif hasattr(policy_nn, "student_obs_normalizer"):
+    #     normalizer = policy_nn.student_obs_normalizer
+    # else:
+    #     normalizer = None
 
-    # export policy to onnx/jit
+    # export to JIT and ONNX
+    # export_him_policy_as_jit(policy_nn, normalizer=normalizer, num_one_step_obs=env.unwrapped.observation_space["policy"].shape[-1], path=export_model_dir, filename="policy.pt")
+    # export_him_policy_as_onnx(policy_nn, normalizer=normalizer, num_one_step_obs=env.unwrapped.observation_space["policy"].shape[-1], path=export_model_dir, filename="policy.onnx")
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
-    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
-    
+    runner.export_policy_to_jit(path=export_model_dir, filename="policy.pt")
+    runner.export_policy_to_onnx(path=export_model_dir, filename="policy.onnx")
+
+    # export_policy_as_jit(him_estimator, normalizer=normalizer, path=export_model_dir, filename="him_estimator.pt")
+    # export_policy_as_onnx(him_estimator, normalizer=normalizer, path=export_model_dir, filename="him_estimator.onnx")
+
     dt = env.unwrapped.step_dt
     env.unwrapped.train_mode = False
+
     # reset environment
     obs = env.get_observations()
     timestep = 0
-
-
-    # gamepad
-    pad = gamepad.control_gamepad(env.unwrapped.cfg.command_cfg)
-
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
-            actions = policy(obs)
+            encoder_out = encoder(obs)
+            actions = policy(obs, encoder_out)
             # env stepping
-            obs, _, _, _ = env.step(actions)
-            # commands
-            comands, reset_flag, terrain_id, terrain_level = pad.get_commands()
-            # print(f"comands: {comands}")
-            env.unwrapped.set_commands(np.arange(env.unwrapped.num_envs), comands)
-            if terrain_id or terrain_level:
-                env.unwrapped.set_terrain_id(terrain_id, terrain_level)
-
-            if reset_flag:
+            obs, _, dones, _ = env.step(actions)
+            comands, reset, esc, terrain_level, terrain_type = pad.get_commands()
+            env.unwrapped.set_commands(comands)
+            if terrain_type or terrain_level:
+                env.unwrapped.set_terrain( terrain_level, terrain_type)
+            # reset recurrent states for episodes that have terminated
+            if reset:
                 env.reset()
-        
+            if esc:
+                break
         if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video

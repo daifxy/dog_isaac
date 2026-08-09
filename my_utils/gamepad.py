@@ -56,38 +56,12 @@ class control_gamepad:
                         self.commands[1] = self.command_cfg["lin_vel_y_range"][0] * 0.5 if self.stand_flag else self.command_cfg["lin_vel_y_range"][0] 
                     case pygame.K_q:
                         self.commands[2] = self.command_cfg["ang_vel_range"][0] * 0.5 if self.stand_flag else self.command_cfg["ang_vel_range"][1]
-                        # safe_linv_x = np.clip(np.abs(self.commands[0]), a_min=1e-2, a_max=1000)
-                        # angv_limit = self.command_cfg["inverse_linx_angv"] / safe_linv_x
-                        # self.commands[2] = np.min([angv_limit, self.command_cfg["ang_vel_range"][1]])
-                        # if self.stand_flag:
-                        #     self.commands[2] = np.clip(self.commands[2], a_min=0, a_max=self.command_cfg["ang_vel_range"][1]/2)
                     case pygame.K_e:
                         self.commands[2] = self.command_cfg["ang_vel_range"][1] * 0.5 if self.stand_flag else self.command_cfg["ang_vel_range"][0]
-                        # safe_linv_x = np.clip(np.abs(self.commands[0]), a_min=1e-2, a_max=1000)
-                        # angv_limit = self.command_cfg["inverse_linx_angv"] / safe_linv_x
-                        # self.commands[2] = np.max([-angv_limit, self.command_cfg["ang_vel_range"][0]])
-                        # if self.stand_flag:
-                        #     self.commands[2] = np.clip(self.commands[2], a_min=self.command_cfg["ang_vel_range"][0]/2, a_max=0)
-                    case pygame.K_1:
-                        terrain_id = 0
-                    case pygame.K_2:
+                    case pygame.K_LSHIFT:
                         terrain_id = 1
-                    case pygame.K_3:
-                        terrain_id = 2
-                    case pygame.K_4:
-                        terrain_id = 3
-                    case pygame.K_5:
-                        terrain_id = 4
-                    case pygame.K_6:
-                        terrain_id = 5
-                    case pygame.K_7:
-                        terrain_id = 6
-                    case pygame.K_8:
-                        terrain_id = 7
-                    case pygame.K_9:
-                        terrain_id = 8
-                    case pygame.K_0:
-                        terrain_id = 9
+                    case pygame.K_SPACE:
+                        terrain_id = -1
                     case pygame.K_PAGEUP:
                         terrain_level = 1
                     case pygame.K_PAGEDOWN:
@@ -131,3 +105,65 @@ class control_gamepad:
             self.commands[2] = self.command_cfg["ang_vel_range"][0]
         elif (self.commands[2] >= self.command_cfg["ang_vel_range"][1]):
             self.commands[2] = self.command_cfg["ang_vel_range"][1]
+
+
+
+class GamepadSimple:
+    """直接读取 Linux /dev/input/jsX 设备文件，输出 SE(2) 速度指令。
+
+    """
+
+    def __init__(self, vx=1.0, vy=1.0, wz=2.0, dead_zone=0.1, dev="/dev/input/js0"):
+        import os
+        self._vx = vx
+        self._vy = vy
+        self._wz = wz
+        self._dead_zone = dead_zone
+        try:
+            self._fd = os.open(dev, os.O_RDONLY | os.O_NONBLOCK)
+            self._axes = [0.0] * 8
+            self._buttons = [0] * 16
+            self._connected = True
+            print(f"手柄已连接: {dev}")
+        except FileNotFoundError:
+            self._fd = None
+            self._connected = False
+            print(f"未检测到手柄 ({dev})，返回零指令")
+
+    def _poll(self):
+        if not self._connected:
+            return
+        import struct, os
+        try:
+            while True:
+                data = os.read(self._fd, 8)
+                if not data:
+                    break
+                _time, value, ev_type, number = struct.unpack('IhBB', data)
+                ev_type &= 0x7f
+                if ev_type == 2:
+                    self._axes[number] = value / 32767.0
+                elif ev_type == 1:
+                    self._buttons[number] = value
+        except BlockingIOError:
+            pass
+
+    def advance(self) -> np.ndarray:
+        """每帧调用，返回当前摇杆对应的速度指令。"""
+        self._poll()
+        cmd = np.zeros(3, dtype=np.float32)
+        ly = self._axes[1]    # 左摇杆 Y 轴 (向上为负)
+        lx = self._axes[0]    # 左摇杆 X 轴
+        rx = self._axes[3]    # 右摇杆 X 轴（用于转向）
+        reset = False
+        if abs(ly) > self._dead_zone:
+            cmd[0] = -ly * self._vx    # 前进/后退（取反修正方向）
+        if abs(lx) > self._dead_zone:
+            cmd[1] = -lx * self._vy    # 左移/右移
+        if abs(rx) > self._dead_zone:
+            cmd[2] = -rx * self._wz    # 左转/右转
+        if self._buttons[1] >= 1.0:
+            reset = True
+        death = cmd[:] < 0.1
+        cmd[death] = 0.0
+        return cmd, reset, 0
