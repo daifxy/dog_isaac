@@ -124,7 +124,7 @@ class PPO:
             chain(self.actor.parameters(), self.critic.parameters()), lr=learning_rate
         )  # type: ignore
 
-        if self.encoder.output_dim != 0:
+        if self.encoder.output_dim != None:
             self.extra_optimizer = optim.Adam(
                 self.encoder.parameters(), lr=est_learning_rate
             )

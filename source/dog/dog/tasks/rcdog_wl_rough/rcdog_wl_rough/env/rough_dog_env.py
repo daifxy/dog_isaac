@@ -67,7 +67,7 @@ class DogEnv(ManagerBasedRLEnv):
             # -- reward computation
             self.reward_buf = self.reward_manager.compute(dt=self.step_dt)
             if self.cfg.only_positive_rewards:
-                self.reward_buf[self.reward_buf < 0] = 0.
+                self.reward_buf[self.reward_buf < 0.] = 0.
         else:
             self.reward_buf = torch.zeros(self.num_envs, device=self.device)
             self.reset_terminated = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)

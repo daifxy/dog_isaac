@@ -15,51 +15,10 @@ parent_dir = os.path.dirname(__file__)
 
 USDPATH = parent_dir + "/Collected_complete_enue_mesh/complete_enue_mesh.usd"
 
-# ROUGH_TERRAINS_GENERATOR_CFG = TerrainGeneratorCfg(
-#     size=(10., 10.),
-#     border_width=25.0,
-#     num_rows=9,
-#     num_cols=5,
-#     curriculum=True,
-#     horizontal_scale=0.1,
-#     vertical_scale=0.005,
-#     slope_threshold=0.75,
-#     use_cache=True,
-#     sub_terrains={
-#         # "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-#         #     proportion=0.25,
-#         #     step_height_range=(0.0, 0.15),
-#         #     step_width=0.3,
-#         #     platform_width=1.5,
-#         #     border_width=0.5,
-#         #     holes=False,
-#         # ),
-#         "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
-#             proportion=0.2,
-#             step_height_range=(0.0, 0.16),
-#             step_width=0.3,
-#             platform_width=4,
-#             border_width=0.3,
-#             holes=False,
-#         ),
-#         "boxes": terrain_gen.MeshRandomGridTerrainCfg(
-#             proportion=0.2, grid_width=0.45, grid_height_range=(0.01, 0.15), platform_width=1.5
-#         ),
-#         "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
-#             proportion=0.2, noise_range=(0.01, 0.1), noise_step=0.02, border_width=0.25
-#         ),
-#         "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-#             proportion=0.2, slope_range=(0.0, 0.2), platform_width=1.5, border_width=0.25
-#         ),
-#         "plane": terrain_gen.HfPyramidSlopedTerrainCfg(
-#             proportion=0.2, slope_range=(0.0, 0.0), platform_width=1.5, border_width=0.25
-#         ),
-#     },
-# )
 """Rough terrains configuration."""
 ROUGH_TERRAINS_GENERATOR_CFG = TerrainGeneratorCfg(
     size=(8., 8.),
-    border_width=3.0,
+    border_width=6.0,
     num_rows=30,
     num_cols=3,
     curriculum=True,
@@ -89,7 +48,7 @@ ROUGH_TERRAINS_GENERATOR_CFG = TerrainGeneratorCfg(
         #     proportion=0.25, slope_range=(0.0, 0.0), platform_width=1.5, border_width=0.25
         # ),
         "platform": terrain_gen.MeshPitTerrainCfg(
-            proportion=0.333, pit_depth_range=(0.0, 0.8), platform_width=1.5, double_pit=True
+            proportion=0.333, pit_depth_range=(0.0, 1.0), platform_width=5.0, double_pit=False
         ),
     },
 )

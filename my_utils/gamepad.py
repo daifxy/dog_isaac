@@ -113,7 +113,7 @@ class GamepadSimple:
 
     """
 
-    def __init__(self, vx=1.0, vy=1.0, wz=2.0, dead_zone=0.1, dev="/dev/input/js0"):
+    def __init__(self, vx=1.0, vy=1.0, wz=1.0, dead_zone=0.1, dev="/dev/input/js0"):
         import os
         self._vx = vx
         self._vy = vy
@@ -164,6 +164,5 @@ class GamepadSimple:
             cmd[2] = -rx * self._wz    # 左转/右转
         if self._buttons[1] >= 1.0:
             reset = True
-        death = cmd[:] < 0.1
-        cmd[death] = 0.0
+
         return cmd, reset, 0

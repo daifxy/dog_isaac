@@ -37,7 +37,7 @@ from . import mdp
 
 from dog.assets.robot.config import WL_DOG_CFG  # isort:skip
 from dog.assets.robot.config import WL_DOG_ACTION_SCALE  # isort:skip
-from dog.assets.robot.config import WL_DOG_LEG_JOINT_NAMES, WL_DOG_WHEEL_JOINT_NAMES  # isort:skip
+from dog.assets.robot.config import WL_DOG_LEG_JOINT_NAMES, WL_DOG_WHEEL_JOINT_NAMES, WL_DOG_LEG_BODY_NAMES, WL_DOG_WHEEL_BODY_NAMES  # isort:skip
 from dog.assets.terrain.terrain import ROUGH_TERRAIN, PLANE, COMPLETE_ENUE_MESH  # isort:skip
 
 ##
@@ -142,7 +142,7 @@ class ActionsCfg:
                                       scale=0.25,
                                       preserve_order=True,
                                       use_default_offset=True,
-                                      noise=UniformNoise(operation="add", n_min=-0.02, n_max=0.02))
+                                      noise=UniformNoise(operation="add", n_min=-0.005, n_max=0.005))
     wheels = mdp.action_cfg.VelActionCfg(asset_name="robot", 
                                         joint_names=WL_DOG_WHEEL_JOINT_NAMES, 
                                         clip={".*": [-10.0, 10.0]},
@@ -177,7 +177,7 @@ class ObservationsCfg:
         proj_gravity = ObsTerm(func=mdp.projected_gravity, noise=UniformNoise(operation="add", n_min=-0.02, n_max=0.02), scale=1.0,)
         command = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"})
         joint_pos = ObsTerm(func=mdp.joint_pos_rel, 
-                                noise=UniformNoise(operation="add", n_min=-0.08, n_max=0.08),
+                                noise=UniformNoise(operation="add", n_min=-0.04, n_max=0.04),
                                 scale=1.0, 
                                 params={"asset_cfg": SceneEntityCfg("robot", 
                                                                     joint_names=WL_DOG_LEG_JOINT_NAMES,
@@ -189,7 +189,7 @@ class ObservationsCfg:
                                                                     joint_names=[*WL_DOG_LEG_JOINT_NAMES, *WL_DOG_WHEEL_JOINT_NAMES],
                                                                     preserve_order=True)})
         joint_torque = ObsTerm(func=mdp.robot_joint_torque,
-                                noise=UniformNoise(operation="add", n_min=-2.6, n_max=2.6),
+                                noise=UniformNoise(operation="add", n_min=-2.5, n_max=2.5),
                                 scale=0.1, 
                                 params={"asset_cfg": SceneEntityCfg("robot", 
                                                                     joint_names=[*WL_DOG_LEG_JOINT_NAMES, *WL_DOG_WHEEL_JOINT_NAMES],
@@ -232,12 +232,12 @@ class ObservationsCfg:
                                params={"sensor_cfg": SceneEntityCfg(name="imu_sensor")},
                                clip=(-100.0, 100.0),scale=0.05,)
         feet_lin_vel = ObsTerm(
-            func=mdp.feet_lin_vel, params={"asset_cfg": SceneEntityCfg("robot", body_names=WL_DOG_WHEEL_JOINT_NAMES, 
+            func=mdp.feet_lin_vel, params={"asset_cfg": SceneEntityCfg("robot", body_names=WL_DOG_WHEEL_BODY_NAMES, 
                                                                        preserve_order=True)}
         )
         feet_contact_force = ObsTerm(
             func=mdp.robot_contact_force, params={"sensor_cfg": SceneEntityCfg("contact_sensor",
-                                                                                body_names=WL_DOG_WHEEL_JOINT_NAMES, 
+                                                                                body_names=WL_DOG_WHEEL_BODY_NAMES, 
                                                                                 preserve_order=True)}
         )
 
@@ -299,8 +299,8 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "stiffness_distribution_params": (0.99, 1.01),
-            "damping_distribution_params": (0.99, 1.01),
+            "stiffness_distribution_params": (0.9, 1.1),
+            "damping_distribution_params": (0.9, 1.1),
             "operation": "scale",
         }
     )
@@ -356,7 +356,7 @@ class EventCfg:
                 "x": [-0.07, 0.07],
                 "y": [-0.07, 0.07],
                 "z": [-0.07, 0.07],
-                "yaw": [0.5, 0.5],
+                "yaw": [-0.5, 0.5],
                 "pitch": [0.0, 0.0],
                 "roll": [0.0, 0.0],
             }
@@ -431,17 +431,17 @@ class RewardsCfg:
                                                                         "command_name": "base_velocity"})
     hip_symmetry = RewTerm(func=mdp.hip_joint_symmetry, weight=-0.02, params={"command_name": "base_velocity"})
     pen_action_smoothness = RewTerm(func=mdp.ActionSmoothnessPenalty, weight=-0.005)
-    joint_powers_l1 = RewTerm(func=mdp.joint_powers_l1, weight=-2.5e-6, params={"command_name": "base_velocity",
+    joint_powers_l1 = RewTerm(func=mdp.joint_powers_l1, weight=-2.5e-5, params={"command_name": "base_velocity",
                                                                                "asset_cfg": SceneEntityCfg(name="robot", 
                                                                                                             joint_names=[".*"])})
     stand_still = RewTerm(func=mdp.stand_still, weight=-0.1, 
                           params={"command_name": "base_velocity", 
                                   "command_threshold": 0.1,
                                   "asset_cfg": SceneEntityCfg(name="robot",joint_names=["^(?!.*FOOT).*"],)})
-    # dof_vel = RewTerm(func=mdp.dof_vel, weight=-0.1, 
-    #                       params={"command_name": "base_velocity", 
-    #                               "command_threshold": 0.1,
-    #                               "asset_cfg": SceneEntityCfg(name="robot",joint_names=[".*FOOT.*"],)})
+    dof_vel = RewTerm(func=mdp.dof_vel, weight=-0.1, 
+                          params={"command_name": "base_velocity", 
+                                  "command_threshold": 0.1,
+                                  "asset_cfg": SceneEntityCfg(name="robot",joint_names=[".*FOOT.*"],)})
 
 
 @configclass
@@ -484,7 +484,7 @@ class DogEnvCfg(ManagerBasedRLEnvCfg):
     def __post_init__(self) -> None:
         """Post initialization."""
         # general settings
-        self.decimation = 8
+        self.decimation = 5
         self.episode_length_s = 10
         # self.ui_window_class_type = None
         # viewer settings
@@ -496,7 +496,7 @@ class DogEnvCfg(ManagerBasedRLEnvCfg):
             asset_name="robot",
         )
         # simulation settings
-        self.sim.dt = 0.0025
+        self.sim.dt = 0.004
         self.sim.render_interval = self.decimation
         self.only_positive_rewards = True
 

@@ -83,8 +83,8 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
     max_iterations = 20000
     save_interval = 500
-    experiment_name = "rcdog_wl"
-    run_name = "rcdog_wl"
+    experiment_name = "wl_flat"
+    run_name = "wl_flat"
     check_for_nan = True
 
     actor: MLPModelCfg = MLPModelCfg(
@@ -105,7 +105,7 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
     encoder: EncoderMLPModelCfg = EncoderMLPModelCfg(
         class_name= "EncoderMLPModel",
-        is_mlp_encoder= True, # Whether to use a MLP encoder. Defaults to True.
+        is_mlp_encoder= False, # Whether to use a MLP encoder. Defaults to True.
         hidden_dims= [256, 128],
         activation= "elu",
         output_dim= 3,

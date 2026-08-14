@@ -5,7 +5,16 @@
 
 from isaaclab.utils import configclass
 
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
+from isaaclab_rl.rsl_rl import (
+    RslRlOnPolicyRunnerCfg, 
+    RslRlPpoActorCriticCfg, 
+    RslRlPpoAlgorithmCfg, 
+    RslRlDistillationRunnerCfg, 
+    RslRlDistillationStudentTeacherCfg,
+    RslRlDistillationAlgorithmCfg,
+    RslRlSymmetryCfg
+)
+from dog.tasks.rcdog_wl_rough.rcdog_wl_rough.mdp.symmetry import wl_rough
 
 from .rsl_cfg import (
     HimActorCriticCfg, 
@@ -79,9 +88,9 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
     num_steps_per_env = 24
     max_iterations = 20000
-    save_interval = 500
-    experiment_name = "rcdog_wl"
-    run_name = "rcdog_wl"
+    save_interval = 200
+    experiment_name = "wl_rough"
+    run_name = "wl_rough"
     check_for_nan = True
 
     actor: MLPModelCfg = MLPModelCfg(
@@ -102,11 +111,17 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
     encoder: EncoderMLPModelCfg = EncoderMLPModelCfg(
         class_name= "EncoderMLPModel",
-        is_mlp_encoder= True, # Whether to use a MLP encoder. Defaults to True.
+        is_mlp_encoder= False, # Whether to use a MLP encoder. Defaults to True.
         hidden_dims= [256, 128],
         activation= "elu",
         output_dim= 3,
         )
+    symmetry_cfg=RslRlSymmetryCfg(
+        use_data_augmentation=True,
+        use_mirror_loss=True,
+        mirror_loss_coeff=0.24,
+        data_augmentation_func=wl_rough.compute_symmetric_states
+    ),
 
     algorithm = EncoderRslRlPpoAlgorithmCfg(
         class_name= "PPO",
@@ -117,7 +132,7 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
         num_learning_epochs=5,
         num_mini_batches=4,
         learning_rate=1.0e-3,
-        est_learning_rate=1.e-3,
+        est_learning_rate=1.e-5,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
