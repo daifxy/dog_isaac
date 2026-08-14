@@ -15,24 +15,13 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from my_utils.gamepad import GamepadSimple
 
 # 加载 mujoco 模型
-m = mujoco.MjModel.from_xml_path('/home/rp/dog/source/dog/dog/assets/robot/mjcf/wl_dog/wl_dog.xml')
+m = mujoco.MjModel.from_xml_path('/home/rp/dog_lab/sim2sim/scence.xml')
 d = mujoco.MjData(m)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-DECIMATION = 8
+DECIMATION = 4
 TIME_STEP = m.opt.timestep * DECIMATION
-# FPS = 60.
-
-OBS_HISTORY_KEYS = [
-    "velocity_commands",
-    "base_ang_vel",
-    "projected_gravity",
-    "joint_pos",
-    "joint_vel",
-    # "joint_frc",
-    "actions",
-]
 
 MJ_JOINT_NAMES = [
     "LF_ABAD_JOINT",  
@@ -76,21 +65,19 @@ LAB_WHEEL_JOINT_NAMES = [
 ]
 
 LAB_JOINT_NAMES = [*LAB_LEG_JOINT_NAMES, *LAB_WHEEL_JOINT_NAMES]
-# ids = [mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, name) for name in MJ_JOINT_NAMES]
-# print(ids)
-
+ 
 class RoboCfg:
 
     stiffness = np.array([
-        100., 100., 100., 100., 100., 100., 100., 100., 100., 100., 100., 100., 0., 0., 0., 0.
+        80., 80., 80., 80., 80., 80., 80., 80., 80., 80., 80., 80., 0., 0., 0., 0.
     ], dtype=np.float32)
          
     damping = np.array([
-        6., 6., 6., 6., 6., 6., 6., 6., 6., 6., 6., 6., 3., 3., 3., 3.
+        4., 4., 4., 4., 4., 4., 4., 4., 4., 4., 4., 4., 3.5, 3.5, 3.5, 3.5
     ], dtype=np.float32)
 
     default_pos = np.array([
-        0., 0.86, -1.42, 0., 0.86, -1.42, 0., 0.76, -1.42, 0., 0.76, -1.42, 0., 0., 0., 0.
+        0., 0.55, -1.6, 0., 0.55, -1.6, 0., 0.76, -1.68, 0., 0.76, -1.68, 0., 0., 0., 0.
     ], dtype=np.float32)
 
     tau_limit = np.array([
@@ -104,7 +91,7 @@ class RoboCfg:
     action_clip = np.array([
         2.7, 2.7, 2.7, 2.7, 2.7, 2.7, 2.7, 2.7, 2.7, 2.7, 2.7, 2.7, 10., 10., 10., 10.
     ], dtype=np.float32)
-    ''' 以上皆基于Lab关节顺序 '''
+    ''' NOTE: 以上皆基于Lab关节顺序 '''
 
     imu_quat_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SENSOR, "imu_quat")
     imu_gyro_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SENSOR, "imu_gyro")
@@ -116,7 +103,7 @@ class RoboCfg:
 
     usd2urdf = [MJ_JOINT_NAMES.index(name) for name in LAB_JOINT_NAMES]
     frame_stack = 4
-    num_single_obs = 53         
+    num_single_obs = 69         
     num_observations = num_single_obs * frame_stack  
     num_actions = 16
 
@@ -153,9 +140,9 @@ class History:
         "base_ang_vel": TermHistory(RoboCfg.frame_stack, 3),
         "projected_gravity": TermHistory(RoboCfg.frame_stack, 3),
         "velocity_commands": TermHistory(RoboCfg.frame_stack, 3),
-        "joint_pos": TermHistory(RoboCfg.frame_stack, RoboCfg.num_actions - 4),
+        "joint_pos": TermHistory(RoboCfg.frame_stack, RoboCfg.num_actions - 4), # 注意这里去掉了4个轮子
         "joint_vel": TermHistory(RoboCfg.frame_stack, RoboCfg.num_actions),
-        # "joint_frc": TermHistory(RoboCfg.frame_stack, RoboCfg.num_actions),
+        "joint_frc": TermHistory(RoboCfg.frame_stack, RoboCfg.num_actions),
         "actions": TermHistory(RoboCfg.frame_stack, RoboCfg.num_actions),
     }
 
@@ -163,69 +150,6 @@ class History:
         for key, value in self.obs_buffer.items():
             value.reset()
             self.is_first_frame = True
-
-
-class Command:
-    vx, vy, dyaw = 0.0, 0.0, 0.0
-    vx_increment = 0.1
-    vy_increment = 0.1
-    dyaw_increment = 0.1
-
-    min_vx = -1.0
-    max_vx = 2.0
-    min_vy = -1.0
-    max_vy = 1.0
-    min_dyaw = -1.0
-    max_dyaw = 1.0
-    reset_requested = False
-
-    def __init__(self):
-        self.reset()
-        listener = keyboard.Listener(on_press=self.on_press)
-        listener.start()
-
-    def reset(self):
-        """reset all velocities to zero"""
-        self.vx = 0.0
-        self.vy = 0.0
-        self.dyaw = 0.0
-        self.reset_requested = True
-        self.terminate = False
-        print(f"Velocities reseted. ")
-
-    def advance(self):
-        """get current command"""
-        vx, vy, dyaw = self.vx, self.vy, self.dyaw
-        is_reset = self.reset_requested
-        terminate = self.terminate
-        self.reset_requested = False
-        return [vx, vy, dyaw], is_reset, terminate
-
-    def on_press(self, key):
-        """Key press event handler"""
-        try:
-            # Number key controls: 8/5 control forward/backward (vx), 4/6 control left/right (vy), 7/9 control left/right turn (dyaw)
-            if hasattr(key, 'char') and key.char is not None:
-                c = key.char.lower()
-                if c == '8':
-                    self.vx = np.clip(self.vx + Command.vx_increment, self.min_vx, self.max_vx)
-                elif c == '2':
-                    self.vx = np.clip(self.vx - Command.vx_increment, self.min_vx, self.max_vx)
-                elif c == '4':
-                    self.vy = np.clip(self.vy + Command.vy_increment, self.min_vy, self.max_vy)
-                elif c == '6':
-                    self.vy = np.clip(self.vy - Command.vy_increment, self.min_vy, self.max_vy)
-                elif c == '7':
-                    self.dyaw = np.clip(self.dyaw + Command.dyaw_increment, self.min_dyaw, self.max_dyaw)
-                elif c == '9':
-                    self.dyaw = np.clip(self.dyaw - Command.dyaw_increment, self.min_dyaw, self.max_dyaw)
-                elif c == '5':
-                    self.terminate = True
-                elif c == '0':
-                    self.reset()
-            print(f"cmd: {self.vx:.2f}, {self.vy:.2f}, {self.dyaw:.2f}")
-        except AttributeError:
-            pass
 
 
 def set_joint_angle(joint_name, angle):
@@ -245,7 +169,7 @@ def reset(observation: History):
     observation.reset()
     # 注意：actions 需要在 sim_step 调用方重置，这里无法访问
 
-def control(target_pos, pos, target_vel, vel):
+def PDcontrol(target_pos, pos, target_vel, vel):
     tau = (target_pos - pos) * RoboCfg.stiffness + (target_vel - vel) * RoboCfg.damping
     return np.clip(tau, -RoboCfg.tau_limit, RoboCfg.tau_limit)
 
@@ -272,6 +196,15 @@ def get_sensor_data(sensor_id):
     )
 
 
+def process_cmd(cmd, x_range: float, y_range: float, yaw_range: float):
+    length = np.linalg.norm([x_range, y_range])
+    b = (1 - np.linalg.norm(cmd[:2])/length).clip(min=0.2, max=1.0)
+    yaw_min = -yaw_range * b
+    yaw_max = yaw_range * b
+    cmd[2] = cmd[2].clip(min=yaw_min, max=yaw_max)
+    return np.round(cmd, decimals=3, out=cmd)
+
+
 def get_obs(actions, commands=[0.5, 0.0, 0.0]):
     base_quat = get_sensor_data(RoboCfg.imu_quat_id) # np
     gravity = [0.0, 0.0, -1.0]
@@ -290,9 +223,7 @@ def get_obs(actions, commands=[0.5, 0.0, 0.0]):
     for i, id in enumerate(RoboCfg.frc_sensor_ids):
         dof_frc[i] = get_sensor_data(id)[0]
 
-    cmds = np.array(commands, dtype=np.float32)
-    death = cmds[:] < 0.1
-    cmds[death] = 0.0
+    cmds = process_cmd(commands, x_range=1.0, y_range=1.0, yaw_range=1.5)
 
     return (
             imu_gyro,  # 3
@@ -300,7 +231,7 @@ def get_obs(actions, commands=[0.5, 0.0, 0.0]):
             cmds,  # 3
             dof_pos,  # 12
             dof_vel,  # 16
-            # dof_frc, # 16
+            dof_frc, # 16
             actions.copy().astype(np.float32),  # 16
     )
 
@@ -311,8 +242,6 @@ def main(args):
         loaded_policy = torch.jit.load(args.load_policy, map_location=torch.device('cpu'))
         loaded_policy.eval()  # 设置为评估模式
 
-        loaded_encoder = torch.jit.load(args.load_encoder, map_location=torch.device('cpu'))
-        loaded_encoder.eval()
         print("模型加载成功!")
     except Exception as e:
         print(f"模型加载失败: {e}")
@@ -325,9 +254,9 @@ def main(args):
 
     # 初始化观察数据
     actions = RoboCfg.default_pos.copy()  # 初始 processed action = default_pos（对应 raw=0）
-    ctlData = np.zeros(16, dtype=np.float32)
-    target_pos = np.zeros(16, dtype=np.float32)
-    target_vel = np.zeros(16, dtype=np.float32)
+    ctlData = np.zeros(RoboCfg.num_actions, dtype=np.float32)
+    target_pos = np.zeros(RoboCfg.num_actions, dtype=np.float32)
+    target_vel = np.zeros(RoboCfg.num_actions, dtype=np.float32)
 
     # cmd_listener = Command()
     cmd_listener = GamepadSimple()
@@ -338,34 +267,36 @@ def main(args):
         Returns (should_continue).
         """
         cmd, is_reset, terminate = cmd_listener.advance()
+        
         if is_reset:
             reset(observation)
             actions[:] = 0.0  # 重置动作到初始处理值
         if terminate:
             return False
 
-        ang_vel, pro_grav, cmds, dof_pos, dof_vel, last_actions = get_obs(actions, commands=cmd)
+        ang_vel, pro_grav, cmds, dof_pos, dof_vel, dof_frc, last_actions = get_obs(actions, commands=cmd)
+        print(cmds)
 
-        obs_slice = [
-            ang_vel * 0.5, 
-            pro_grav * 1.0, 
-            cmds * 1.0, 
-            (dof_pos- RoboCfg.default_pos)[:12] * 1.0, 
-            dof_vel * 0.1, 
-            # dof_frc * 0.1, 
-            last_actions
-        ]
+        obs_slice = {
+            "base_ang_vel": ang_vel * 0.5, 
+            "projected_gravity": pro_grav * 1.0, 
+            "velocity_commands": cmds * 1.0, 
+            "joint_pos": (dof_pos- RoboCfg.default_pos)[:12] * 1.0, 
+            "joint_vel": dof_vel * 0.1, 
+            "joint_frc": dof_frc * 0.1, 
+            "actions": last_actions
+        }
 
         if observation.is_first_frame:
-            for key, vec in zip(OBS_HISTORY_KEYS, obs_slice):
+            for key, vec in obs_slice.items():
                 observation.obs_buffer[key].fill_tile(vec)
             observation.is_first_frame = False
         else:
-            for key, vec in zip(OBS_HISTORY_KEYS, obs_slice):
+            for key, vec in obs_slice.items():
                 observation.obs_buffer[key].append(vec)
 
         obs_hist = np.concatenate(
-            [observation.obs_buffer[key].flat() for key in OBS_HISTORY_KEYS], axis=0
+            [observation.obs_buffer[key].flat() for key in obs_slice.keys()], axis=0
         )[None, :].astype(np.float32)
         assert obs_hist.shape[1] == RoboCfg.num_observations, (
             f"Expected policy input dim {RoboCfg.num_observations}, "
@@ -374,12 +305,13 @@ def main(args):
         obs_hist = torch.tensor(obs_hist)
 
         with torch.inference_mode():
-            encoder_out = loaded_encoder(obs_hist)
+            # encoder_out = loaded_encoder(obs_hist)
 
-            policy_input = torch.cat([encoder_out, obs_hist], dim=-1)
-            actions[:] = loaded_policy(policy_input)[0].detach().numpy()
+            # policy_input = torch.cat([encoder_out, obs_hist], dim=-1)
+            actions[:] = loaded_policy(obs_hist)[0].detach().numpy()
         
         processed_actions = actions.copy()
+        # processed_actions = np.zeros_like(actions)
         np.multiply(processed_actions, RoboCfg.action_scale, out=processed_actions)
         np.add(processed_actions, RoboCfg.default_pos, out=processed_actions)
         np.clip(processed_actions, -RoboCfg.action_clip, RoboCfg.action_clip, out=processed_actions)
@@ -388,14 +320,12 @@ def main(args):
         target_vel[:] = 0.0
         target_pos[:12] = processed_actions[:12]
         target_vel[-4:] = processed_actions[-4:]
-        np.round(target_pos, decimals=2, out=target_pos)
-        np.round(target_vel, decimals=2, out=target_vel)
 
-        ctlData[RoboCfg.usd2urdf] = control(target_pos, dof_pos, target_vel, dof_vel)
+        # ctlData[RoboCfg.usd2urdf] = PDcontrol(target_pos, dof_pos, target_vel, dof_vel) # PDcontrol直接力控，力控要求控制频率很高，没写
+        ctlData[RoboCfg.usd2urdf] = np.array([*target_pos[:12], *target_vel[-4:]]) # mujoco的position自己算
         # print(ctlData)
         for i in range(RoboCfg.num_actions):
             d.ctrl[i] = ctlData[i]
-            # print(d.ctrl[i])
 
         for i in range(DECIMATION):
             mujoco.mj_step(m, d)
